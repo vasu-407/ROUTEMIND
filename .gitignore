@@ -1,0 +1,13 @@
+
+almrrc2021-data-training/
+almrrc2021-data-evaluation/
+*.json
+
+
+
+
+__pycache__/
+*.pyc
+.env
+.venv
+venv/
