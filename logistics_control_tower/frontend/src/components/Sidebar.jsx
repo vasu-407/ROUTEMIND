@@ -1,8 +1,9 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, LineChart, ShieldAlert, Route, Activity, Bot, Users, Truck, Settings, BrainCircuit } from 'lucide-react';
 
 const Sidebar = () => {
+  const location = useLocation();
   const links = [
     { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={20} /> },
     { name: 'Route Planner', path: '/route-planner', icon: <Route size={20} /> },
@@ -10,13 +11,15 @@ const Sidebar = () => {
     { name: 'Analytics', path: '/analytics', icon: <LineChart size={20} /> },
     { name: 'AI Insights', path: '/ai-insights', icon: <Bot size={20} /> },
     { name: 'Supervisor Console', path: '/supervisor', icon: <ShieldAlert size={20} /> },
-    { name: 'Drivers', path: '/drivers', icon: <Users size={20} /> },
-    { name: 'Vehicles', path: '/vehicles', icon: <Truck size={20} /> },
     { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ];
 
+  if (location.pathname.startsWith('/driver-mode')) {
+    return null;
+  }
+
   return (
-    <div className="w-64 bg-slate-900 text-slate-300 min-h-screen flex flex-col border-r border-slate-800 font-sans">
+    <div className="w-64 bg-slate-900 text-slate-300 min-h-screen flex flex-col border-r border-slate-800 font-sans shrink-0">
       <div className="p-5 flex items-center space-x-3">
         <div className="bg-indigo-600 p-2 rounded-lg text-white">
           <BrainCircuit size={24} />
@@ -40,7 +43,7 @@ const Sidebar = () => {
               }`
             }
           >
-            <div className={`${link.path === window.location.pathname ? 'text-indigo-500' : 'text-slate-400'}`}>
+            <div className={`${link.path === location.pathname ? 'text-indigo-500' : 'text-slate-400'}`}>
               {link.icon}
             </div>
             <span>{link.name}</span>

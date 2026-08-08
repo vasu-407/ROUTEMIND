@@ -6,9 +6,8 @@ import Supervisor from './pages/Supervisor';
 import RoutePlanner from './pages/RoutePlanner';
 import Simulation from './pages/Simulation';
 import AiInsights from './pages/AiInsights';
-import Drivers from './pages/Drivers';
-import Vehicles from './pages/Vehicles';
 import Settings from './pages/Settings';
+import DriverMode from './pages/DriverMode';
 import Sidebar from './components/Sidebar';
 
 function App() {
@@ -24,9 +23,8 @@ function App() {
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/ai-insights" element={<AiInsights />} />
               <Route path="/supervisor" element={<Supervisor />} />
-              <Route path="/drivers" element={<Drivers />} />
-              <Route path="/vehicles" element={<Vehicles />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/driver-mode" element={<DriverMode />} />
             </Routes>
         </main>
       </div>

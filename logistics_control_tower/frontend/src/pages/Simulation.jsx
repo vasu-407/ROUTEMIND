@@ -77,8 +77,14 @@ const Simulation = () => {
     
     fetchMonitor();
     const interval = setInterval(fetchMonitor, 5000);
+
+    const autoStart = searchParams.get('autoStart');
+    if (autoStart === 'true') {
+      startMonitor().then(() => setIsMonitoring(true)).catch(console.error);
+    }
+
     return () => clearInterval(interval);
-  }, [routeId]);
+  }, [routeId, searchParams]);
 
   const triggerEvent = async (eventType) => {
     if (!routeId) return;
@@ -160,6 +166,27 @@ const Simulation = () => {
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Route Analysis & Simulation</h1>
           <p className="text-slate-500 text-sm mt-1">Simulate and monitor real-time perturbations for Route {routeId.substring(0, 8)}...</p>
         </div>
+        <div className="flex gap-3">
+          <Link to="/route-planner" className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-sm font-bold shadow-sm transition-colors">
+            Back to Planner
+          </Link>
+          <button 
+            onClick={() => {
+              if (mapSequence && mapCoords) {
+                localStorage.setItem('offline_driver_route', JSON.stringify({
+                  route_id: routeId,
+                  sequence: mapSequence,
+                  stop_coordinates: mapCoords
+                }));
+                // Navigate in new tab or same window? Same window.
+                window.location.href = '/driver-mode';
+              }
+            }}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow-sm transition-colors flex items-center"
+          >
+            <Navigation size={16} className="mr-2" /> Start Journey
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-12 gap-6 mb-8">
@@ -207,11 +234,15 @@ const Simulation = () => {
         </div>
 
         {/* MAP PANEL */}
-        <div className="col-span-8 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[300px]">
-          {mapSequence.length > 0 ? (
-             <MapViewer routeSequence={mapSequence} stopCoordinates={mapCoords} />
+        <div className="col-span-8 bg-slate-100 rounded-xl overflow-hidden border border-slate-200 relative shadow-inner h-[600px] flex items-center justify-center">
+          {activeRouteData && mapSequence.length > 0 ? (
+             <MapViewer 
+                routeSequence={mapSequence} 
+                stopCoordinates={mapCoords} 
+                focusedSegment={autoEvents.length > 0 ? autoEvents[0].affected_segment.split('->').map(s => s.trim()) : null}
+             />
           ) : (
-             <div className="flex items-center justify-center h-full text-slate-400">Loading Map Data...</div>
+             <div className="flex items-center justify-center h-full text-slate-400 bg-slate-900 rounded-xl">Loading Map Data...</div>
           )}
         </div>
       </div>

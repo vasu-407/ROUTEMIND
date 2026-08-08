@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getRoutes, compareSolvers } from '../api';
-import { MapPin, Box, Banknote, Clock, Check, Activity, Search, AlertCircle, Maximize2, ArrowRight } from 'lucide-react';
+import { MapPin, Box, Banknote, Clock, Check, Activity, Search, AlertCircle, Maximize2, ArrowRight, Navigation } from 'lucide-react';
 import MapViewer from '../components/MapViewer';
 
 const RoutePlanner = () => {
@@ -225,9 +225,18 @@ const RoutePlanner = () => {
                 View Comparison
               </button>
               <button 
-                onClick={() => alert("Route saved successfully.")}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded shadow-sm transition-colors">
-                Save Route
+                onClick={() => {
+                  if (!selectedRouteData || !selectedSolution) return;
+                  localStorage.setItem('offline_driver_route', JSON.stringify({
+                    route_id: selectedRoute,
+                    sequence: selectedSolution.sequence,
+                    stop_coordinates: mapCoords
+                  }));
+                  navigate('/driver-mode');
+                }}
+                disabled={!selectedSolution}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold py-2 rounded shadow-sm transition-colors flex items-center justify-center">
+                <Navigation size={14} className="mr-1" /> Start Journey
               </button>
             </div>
           </div>

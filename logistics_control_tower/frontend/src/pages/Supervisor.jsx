@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getPendingApprovals, approveRoute } from '../api';
 import { CheckCircle, XCircle, Map as MapIcon, ShieldAlert, Check, X, ArrowRight, Bot } from 'lucide-react';
 import MapViewer from '../components/MapViewer';
@@ -28,13 +29,21 @@ const Supervisor = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const navigate = useNavigate();
+
   const handleAction = async (routeId, action) => {
     setLoading(true);
     try {
       await approveRoute({ route_id: routeId, action, notes: '' });
       if (action === 'approve') {
-          // Send driver notification placeholder
-          console.log("DRIVER NOTIFIED:", selectedItem?.explanation?.driver_notification);
+          // Save to offline storage and dispatch driver
+          localStorage.setItem('offline_driver_route', JSON.stringify({
+            route_id: selectedItem.route_id,
+            sequence: selectedItem.after_sequence,
+            stop_coordinates: selectedItem.stop_coordinates
+          }));
+          navigate('/driver-mode');
+          return;
       }
       loadPending();
     } catch (err) {
