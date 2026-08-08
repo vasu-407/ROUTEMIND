@@ -65,13 +65,21 @@ const AiInsights = () => {
       let textResponse = "";
       if (typeof answerObj === 'string') {
         textResponse = answerObj;
-      } else if (answerObj && answerObj.answer) {
-        textResponse = answerObj.answer;
-        if (answerObj.suggested_actions && answerObj.suggested_actions.length > 0) {
-           textResponse += "\n\nSuggested Actions:\n- " + answerObj.suggested_actions.join("\n- ");
+      } else if (answerObj && typeof answerObj === 'object') {
+        if (answerObj.answer) {
+          textResponse = answerObj.answer;
+          if (answerObj.suggested_actions && answerObj.suggested_actions.length > 0) {
+             textResponse += "\n\nSuggested Actions:\n- " + answerObj.suggested_actions.join("\n- ");
+          }
+        } else if (answerObj.reason_changed) {
+          textResponse = answerObj.reason_changed;
+          if (answerObj.approval_reason) textResponse += "\n\n" + answerObj.approval_reason;
+          if (answerObj.recommended_action) textResponse += "\n\nRecommended Action: " + answerObj.recommended_action.toUpperCase();
+        } else {
+          textResponse = JSON.stringify(answerObj, null, 2);
         }
       } else {
-        textResponse = JSON.stringify(answerObj);
+        textResponse = "No response provided.";
       }
       
       setMessages(m => [...m, { 
