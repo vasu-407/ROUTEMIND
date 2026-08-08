@@ -11,8 +11,8 @@ const Drivers = () => {
     getRoutes().then(res => {
       // Map live routes to active drivers
       const mappedDrivers = res.data.map((r, i) => ({
-        id: `D-${r.route_id.substring(0, 8).toUpperCase()}`,
-        name: `Driver ${r.route_id.substring(0, 5)}`,
+        id: `D-${r.route_id.substring(8, 16).toUpperCase()}`,
+        name: `Driver ${r.route_id.substring(8, 13)}`,
         station: r.station_code || 'Unknown',
         route: r.route_id,
         stops: r.stops,

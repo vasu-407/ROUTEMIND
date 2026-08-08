@@ -1,24 +1,24 @@
 from core.models import Route
 
+
 class EvaluationEngine:
-    def evaluate(self, old_route: Route, new_route: Route) -> dict:
-        """Compares the original and optimized routes to generate KPIs."""
-        
-        # In this minimal implementation, we simulate the metric generation
-        # since we don't have a greedy baseline fully implemented yet.
-        
-        distance_saved = 15.4 # km simulated
-        time_saved = 45 # minutes simulated
-        fuel_saved = (distance_saved * new_route.fuel_cost_per_km) if new_route.fuel_cost_per_km else 2.5
-        
-        old_stops = len(old_route.stops)
-        new_stops = len(new_route.stops)
-        
+    def evaluate(self, greedy_result: dict, ortools_result: dict, route: Route) -> dict:
+        greedy_time = greedy_result.get("total_travel_time_sec", 0)
+        or_time = ortools_result.get("total_travel_time_sec", 0)
+        greedy_dist = greedy_result.get("total_distance_km", 0)
+        or_dist = ortools_result.get("total_distance_km", 0)
+
+        time_saved = max(0, (greedy_time - or_time) / 60.0)
+        dist_saved = max(0, greedy_dist - or_dist)
+        fuel_saved = dist_saved * (route.fuel_cost_per_km or 8.5)
+
         return {
-            "distance_saved_km": distance_saved,
-            "time_saved_mins": time_saved,
-            "fuel_saved_inr": fuel_saved,
-            "stop_completion_rate": (new_stops / old_stops) if old_stops > 0 else 1.0,
-            "route_risk_score": new_route.route_risk_score,
-            "fatigue_score": new_route.driver_fatigue_score
+            "time_saved_mins": round(time_saved, 1),
+            "distance_saved_km": round(dist_saved, 2),
+            "fuel_saved_inr": round(fuel_saved, 2),
+            "fuel_saved_l": round(dist_saved * 0.12, 2),
+            "stop_completion_rate": 1.0,
+            "route_risk_score": route.route_risk_score,
+            "fatigue_score": route.driver_fatigue_score,
+            "execution_time_ms": ortools_result.get("execution_time_ms", 0),
         }

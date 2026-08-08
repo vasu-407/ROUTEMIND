@@ -21,9 +21,20 @@ module.exports = {
   // ── Optimization Service ─────────────────────────────────────
   getDashboard: () => pythonClient.get('/dashboard'),
   getRoutes: () => pythonClient.get('/routes'),
+  getRouteMap: (routeId) => pythonClient.get(`/routes/${encodeURIComponent(routeId)}/map`),
   optimizeRoute: (routeId) => pythonClient.post(`/optimize?route_id=${routeId}`),
   replan: (payload) => pythonClient.post('/replan', payload),
   getComparison: (routeId) => pythonClient.get(`/comparison?route_id=${routeId}`),
+  getSimulations: () => pythonClient.get('/simulations'),
+  getAnalytics: () => pythonClient.get('/analytics'),
+  getPendingApprovals: () => pythonClient.get('/supervisor/pending'),
+  approveRoute: (payload) => pythonClient.post('/supervisor/approve', payload),
+  askCopilot: (payload) => pythonClient.post('/copilot', payload),
+  
+  // ── Monitor Service ──────────────────────────────────────────
+  monitorScan: () => pythonClient.post('/monitor/scan'),
+  getMonitorEvents: () => pythonClient.get('/monitor/events'),
+  demoTraffic: (payload) => pythonClient.post('/demo/traffic', payload),
 
   // ── ML Service ────────────────────────────────────────────────
   predict: (stops) => mlClient.post('/predict', { stops }),

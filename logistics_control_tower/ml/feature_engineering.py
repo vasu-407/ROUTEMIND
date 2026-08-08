@@ -9,17 +9,16 @@ import random
 import os
 import pandas as pd
 
-BASE_DIR = "c:/amazon-last-mile/almrrc2021-data-training/model_build_inputs"
+from core.config import DATA_DIR
+from core.geo import haversine_km
+from engines.travel_times import load_route_matrix
+
+BASE_DIR = DATA_DIR
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
-    """Returns the great-circle distance in km between two coordinates."""
-    R = 6371.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    from core.geo import haversine_km as _h
+    return _h(lat1, lon1, lat2, lon2)
 
 
 def load_raw_data(base_dir):
@@ -88,30 +87,13 @@ def build_features(route_data, package_data, actual_sequences, max_routes=200):
 
             dist_km = haversine_km(lat1, lon1, lat2, lon2)
 
-            # Service time for destination stop
-            stop_pkgs = pkg_data.get(s2_id, {})
-            service_time = sum(p.get("planned_service_time_seconds", 0) for p in stop_pkgs.values())
-            stop_volume = sum(
-                p.get("dimensions", {}).get("depth_cm", 0) *
-                p.get("dimensions", {}).get("height_cm", 0) *
-                p.get("dimensions", {}).get("width_cm", 0)
-                for p in stop_pkgs.values()
-            )
-            num_packages = len(stop_pkgs)
+            tt_matrix = load_route_matrix(route_id)
+            travel_time_s = float(tt_matrix.get(s1_id, {}).get(s2_id, 0) or 0)
+            if travel_time_s <= 0:
+                base_speed_kmh = 30.0
+                travel_time_s = (dist_km / base_speed_kmh) * 3600
 
-            # Zone feature (hash zone_id to int)
-            zone_id_raw = s2.get("zone_id") or s1.get("zone_id") or ""
-            zone_id = abs(hash(zone_id_raw)) % 1000
-
-            # Stop density proxy (stops per km of route so far)
-            stop_density = (i + 1) / max(dist_km * (i + 1), 0.01)
-
-            # Target: simulate actual travel time with traffic noise
-            # Base: distance/speed + service time + jitter
-            base_speed_kmh = random.uniform(20, 45)
-            travel_time_s = (dist_km / base_speed_kmh) * 3600
-            traffic_factor = 1.0 + random.uniform(0, 0.4)  # 0-40% traffic overhead
-            actual_travel_time = travel_time_s * traffic_factor + service_time
+            actual_travel_time = travel_time_s
 
             records.append({
                 "route_id": route_id,

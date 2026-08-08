@@ -1,5 +1,10 @@
 from core.models import Route
+from core.geo import haversine_km, haversine_travel_sec
+from core.config import ML_API_URL, USE_ML_TRAVEL_TIMES
+from engines.route_metrics import sequence_totals
 import time
+import os
+import requests
 
 class RouteOptimizer:
     def __init__(self):
@@ -56,62 +61,69 @@ class RouteOptimizer:
             row_dist = []
             for j, dest in enumerate(stops_list):
                 val = float(route.distance_matrix.get(origin, {}).get(dest, 0.0))
+                o_stop, d_stop = route.stops[origin], route.stops[dest]
                 if val == 0.0 and i != j:
-                    import math
-                    lat1, lon1 = route.stops[origin].lat, route.stops[origin].lng
-                    lat2, lon2 = route.stops[dest].lat, route.stops[dest].lng
-                    R = 6371  # km
-                    dlat = math.radians(lat2 - lat1)
-                    dlon = math.radians(lon2 - lon1)
-                    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
-                    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-                    val = R * c
-                
-                # Fallback static proxy for travel time (e.g. 1 km = 2 mins = 120s)
-                row_time.append(int(val * 120))
-                row_dist.append(val)
+                    val_dist = haversine_km(o_stop.lat, o_stop.lng, d_stop.lat, d_stop.lng)
+                    val_time = haversine_travel_sec(o_stop.lat, o_stop.lng, d_stop.lat, d_stop.lng)
+                elif val > 0 and i != j:
+                    val_dist = haversine_km(o_stop.lat, o_stop.lng, d_stop.lat, d_stop.lng)
+                    val_time = val if val > 50 else haversine_travel_sec(o_stop.lat, o_stop.lng, d_stop.lat, d_stop.lng)
+                else:
+                    val_dist, val_time = 0.0, 0
+
+                row_time.append(int(val_time))
+                row_dist.append(val_dist)
             travel_time_matrix.append(row_time)
             distance_matrix.append(row_dist)
             
-        # Try to use ML Predictions for Travel Time Matrix
-        try:
-            import requests
-            ml_features = []
-            for i, origin in enumerate(stops_list):
-                stop = route.stops[origin]
-                stop_vol = sum(p.volume_cm3 for p in stop.packages)
-                stop_svc = sum(p.planned_service_time_seconds for p in stop.packages)
-                num_pkgs = len(stop.packages)
-                zone_id = hash(stop.zone_id) % 100 if stop.zone_id else 0
-                
-                for j, dest in enumerate(stops_list):
-                    dist_km = distance_matrix[i][j]
-                    ml_features.append({
-                        "distance_km": dist_km,
-                        "departure_hour": 8,
-                        "num_stops": len(stops_list),
-                        "load_ratio": 0.8,
-                        "service_time_sec": stop_svc,
-                        "stop_volume_cm3": stop_vol,
-                        "num_packages": num_pkgs,
-                        "zone_id": zone_id,
-                        "stop_density": len(stops_list) / 100.0,
-                        "executor_capacity_cm3": route.executor_capacity_cm3 or 1.0
-                    })
+        # ML prediction will override the baseline travel times for the optimizer.
+        if USE_ML_TRAVEL_TIMES:
+            ml_features_flat = []
+            pair_indices = []
             
-            resp = requests.post("http://127.0.0.1:8001/predict", json={"stops": ml_features}, timeout=10)
-            if resp.status_code == 200:
-                predictions = resp.json().get("predictions", [])
-                if len(predictions) == len(stops_list) * len(stops_list):
-                    idx = 0
-                    for i in range(len(stops_list)):
-                        for j in range(len(stops_list)):
-                            # Ensure time is at least 1s and integer
-                            travel_time_matrix[i][j] = max(1, int(predictions[idx]))
-                            idx += 1
-                    print("Successfully used ML predictions for OR-Tools transit matrix.")
-        except Exception as e:
-            print(f"ML Prediction failed or timed out: {e}")
+            # Pre-calculate route load ratio
+            route_total_vol = sum(sum(p.volume_cm3 for p in s.packages) for s in route.stops.values())
+            executor_cap = route.executor_capacity_cm3 or 1000000
+            route_load_ratio = min(1.0, route_total_vol / max(executor_cap, 1.0))
+            
+            for i, origin in enumerate(stops_list):
+                for j, dest in enumerate(stops_list):
+                    if i != j:
+                        d_stop = route.stops[dest]
+                        val_dist = distance_matrix[i][j]
+                        stop_vol = sum(p.volume_cm3 for p in d_stop.packages)
+                        svc_time = sum(p.planned_service_time_seconds for p in d_stop.packages)
+                        
+                        # stop_density was 1 / distance in features.csv
+                        stop_density = 1.0 / max(val_dist, 0.001)
+                        
+                        ml_features_flat.append({
+                            "distance_km": val_dist,
+                            "departure_hour": 8,
+                            "num_stops": len(stops_list),
+                            "load_ratio": route_load_ratio,
+                            "service_time_sec": svc_time,
+                            "stop_volume_cm3": stop_vol,
+                            "num_packages": len(d_stop.packages),
+                            "zone_id": hash(d_stop.zone_id) % 1000 if d_stop.zone_id else 0,
+                            "stop_density": stop_density,
+                            "executor_capacity_cm3": executor_cap
+                        })
+                        pair_indices.append((i, j))
+                        
+            if ml_features_flat:
+                try:
+                    resp = requests.post(f"{ML_API_URL}/predict", json={"stops": ml_features_flat}, timeout=30)
+                    if resp.status_code == 200:
+                        predicted_times = resp.json().get("predicted_travel_times_sec", [])
+                        if len(predicted_times) == len(pair_indices):
+                            for idx, (i, j) in enumerate(pair_indices):
+                                travel_time_matrix[i][j] = int(max(0, predicted_times[idx]))
+                            print(f"Successfully integrated {len(predicted_times)} XGBoost travel-time predictions.")
+                    else:
+                        print(f"ML API returned {resp.status_code}: {resp.text}")
+                except Exception as e:
+                    print(f"Failed to fetch ML predictions: {e}")
             
         for i, origin in enumerate(stops_list):
             # Stop Demand and Service Time
@@ -198,12 +210,21 @@ class RouteOptimizer:
         execution_time_ms = int(time.time() * 1000) - start_ms
         
         if solution:
-            return self._extract_solution(manager, routing, solution, stops_list, data, service_times, total_route_demand, execution_time_ms)
+            result = self._extract_solution(manager, routing, solution, stops_list, data, service_times, total_route_demand, execution_time_ms, distance_matrix)
+            seq_metrics = sequence_totals(route, result["sequence"])
+            result.update({
+                "total_distance_km": seq_metrics["total_distance_km"],
+                "total_travel_time_sec": seq_metrics["total_travel_time_sec"],
+                "total_service_time_sec": seq_metrics["total_service_time_sec"],
+                "fuel_estimate_l": seq_metrics["fuel_estimate_l"],
+                "fuel_estimate_inr": seq_metrics["fuel_estimate_inr"],
+            })
+            return result
         else:
             print("No OR-Tools solution found. Time windows or capacities might be too strict.")
             return self._build_empty_response(route)
 
-    def _extract_solution(self, manager, routing, solution, stops_list, data, service_times, total_route_demand, execution_time_ms):
+    def _extract_solution(self, manager, routing, solution, stops_list, data, service_times, total_route_demand, execution_time_ms, distance_matrix):
         index = routing.Start(0)
         optimized_order = []
         total_time = 0
@@ -230,7 +251,7 @@ class RouteOptimizer:
         
         return {
             "sequence": optimized_order,
-            "total_distance_km": total_time / 100.0, # Simulated proxy
+            "total_distance_km": 0,
             "total_travel_time_sec": total_time,
             "total_service_time_sec": total_service,
             "route_efficiency_score": max(0, min(100, route_efficiency)),

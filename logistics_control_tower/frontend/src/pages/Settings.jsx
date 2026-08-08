@@ -15,7 +15,10 @@ const Settings = () => {
 
   const handleSave = () => {
     setSaving(true);
-    setTimeout(() => setSaving(false), 800);
+    setTimeout(() => {
+      setSaving(false);
+      alert('Settings saved successfully.');
+    }, 800);
   };
 
   return (

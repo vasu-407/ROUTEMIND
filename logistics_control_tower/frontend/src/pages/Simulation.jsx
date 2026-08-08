@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Truck, MapPin, Clock, AlertTriangle, Radio, Navigation, CheckCircle2, FileSearch } from 'lucide-react';
-import { getRoutes, replanEvent } from '../api';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Truck, MapPin, Clock, AlertTriangle, Radio, Navigation, Bot, ArrowRight, Play, Square, RefreshCw, Zap, CheckCircle2, Box, Banknote, Activity } from 'lucide-react';
+import { getRoutes, replanEvent, getSimulations, startMonitor, stopMonitor, scanMonitor, getMonitorStatus, getMonitorEvents, simulateTrafficDemo, getRouteMap } from '../api';
+import MapViewer from '../components/MapViewer';
 
 const EVENTS = [
   { type: 'NEW_PICKUP', label: 'New Pickup Request', desc: 'Add a new pickup to route', icon: <MapPin size={24} className="text-blue-500" />, color: 'border-blue-50 hover:border-blue-200' },
@@ -13,18 +14,71 @@ const EVENTS = [
 ];
 
 const Simulation = () => {
-  const [routeId, setRouteId] = useState('');
+  const [searchParams] = useSearchParams();
+  const routeId = searchParams.get('routeId');
+  
   const [routes, setRoutes] = useState([]);
+  const [activeRouteData, setActiveRouteData] = useState(null);
+  const [mapSequence, setMapSequence] = useState([]);
+  const [mapCoords, setMapCoords] = useState({});
+  
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeEvent, setActiveEvent] = useState(null);
+  const [simulations, setSimulations] = useState([]);
+  
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  const [autoEvents, setAutoEvents] = useState([]);
 
   useEffect(() => {
     getRoutes().then(res => {
       setRoutes(res.data);
-      if (res.data.length > 0) setRouteId(res.data[0].route_id);
-    }).catch(err => console.error(err));
-  }, []);
+      if (routeId) {
+        const routeData = res.data.find(r => r.route_id === routeId);
+        setActiveRouteData(routeData || null);
+      }
+    }).catch(console.error);
+
+    if (routeId) {
+      getRouteMap(routeId).then(res => {
+        setMapSequence(res.data.sequence || []);
+        setMapCoords(res.data.stop_coordinates || {});
+      }).catch(console.error);
+    }
+    
+    getSimulations().then(res => {
+      setSimulations(res.data);
+    }).catch(console.error);
+
+    const fetchMonitor = async () => {
+      try {
+        const statRes = await getMonitorStatus();
+        setIsMonitoring(statRes.data.isMonitoring);
+        const evRes = await getMonitorEvents();
+        // Deduplicate and filter by current routeId
+        if (routeId) {
+          const routeEvents = evRes.data.filter(e => e.route_id === routeId);
+          // Deduplicate by event_type and affected_segment
+          const deduped = [];
+          const seen = new Set();
+          for (const ev of routeEvents) {
+            const key = ev.event_type + '_' + ev.affected_segment;
+            if (!seen.has(key)) {
+              seen.add(key);
+              deduped.push(ev);
+            }
+          }
+          setAutoEvents(deduped);
+        } else {
+          setAutoEvents([]);
+        }
+      } catch (err) {}
+    };
+    
+    fetchMonitor();
+    const interval = setInterval(fetchMonitor, 5000);
+    return () => clearInterval(interval);
+  }, [routeId]);
 
   const triggerEvent = async (eventType) => {
     if (!routeId) return;
@@ -33,14 +87,12 @@ const Simulation = () => {
     try {
       const payload = { route_id: routeId, event_type: eventType, data: {} };
       const res = await replanEvent(payload);
-      const data = res.data;
-      
       setResult({ 
         eventType, 
         eventLabel: EVENTS.find(e => e.type === eventType)?.label,
-        ...data 
+        ...res.data 
       });
-      
+      getSimulations().then(res => setSimulations(res.data)).catch(console.error);
     } catch (e) {
       setResult({ error: 'Event simulation failed. Is the backend running?' });
     }
@@ -48,118 +100,247 @@ const Simulation = () => {
     setActiveEvent(null);
   };
 
+  const handleToggleMonitor = async () => {
+    try {
+      if (isMonitoring) {
+        await stopMonitor();
+        setIsMonitoring(false);
+      } else {
+        await startMonitor();
+        setIsMonitoring(true);
+      }
+    } catch(e) { console.error("Monitor toggle failed", e); }
+  };
+
+  const handleScanNow = async () => {
+    try {
+      await scanMonitor();
+      const evRes = await getMonitorEvents();
+      if (routeId) {
+          const routeEvents = evRes.data.filter(e => e.route_id === routeId);
+          const deduped = [];
+          const seen = new Set();
+          for (const ev of routeEvents) {
+            const key = ev.event_type + '_' + ev.affected_segment;
+            if (!seen.has(key)) {
+              seen.add(key);
+              deduped.push(ev);
+            }
+          }
+          setAutoEvents(deduped);
+      }
+      getSimulations().then(res => setSimulations(res.data)).catch(console.error);
+    } catch (e) { console.error("Scan failed", e); }
+  };
+
+  const handleSimulateTraffic = async () => {
+    if (!routeId) return;
+    try {
+      await simulateTrafficDemo({ route_id: routeId, from_stop: 'auto', to_stop: 'auto', delay_sec: 2100 });
+      alert(`Demo traffic delay injected on Route ${routeId.substring(0, 8)}... Wait for the monitor to detect it!`);
+    } catch(e) { console.error("Traffic injection failed", e); }
+  };
+
+  if (!routeId) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6 flex flex-col items-center justify-center font-sans">
+        <h2 className="text-xl font-bold text-slate-800 mb-4">No Route Selected</h2>
+        <p className="text-slate-500 mb-6">Please go to the Route Planner and select a route to analyze.</p>
+        <Link to="/route-planner" className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-bold shadow-md transition-colors">
+          Go to Route Planner
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans">
-      <header className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Event Simulator</h1>
-        <p className="text-slate-500 text-sm mt-1">Inject real-time events and observe incremental replanning.</p>
+      <header className="mb-6 flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Route Analysis & Simulation</h1>
+          <p className="text-slate-500 text-sm mt-1">Simulate and monitor real-time perturbations for Route {routeId.substring(0, 8)}...</p>
+        </div>
       </header>
 
-      {/* Event Grid */}
+      <div className="grid grid-cols-12 gap-6 mb-8">
+        {/* ROUTE ANALYSIS PANEL */}
+        <div className="col-span-4 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+          <div className="bg-slate-800 p-4">
+            <h2 className="text-white font-bold flex items-center"><Box size={18} className="mr-2" /> Route Analysis</h2>
+          </div>
+          <div className="p-5 flex-1 grid grid-cols-2 gap-y-6 gap-x-4">
+            <div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Route</p>
+              <p className="text-sm font-semibold text-slate-800">{activeRouteData?.label || routeId.substring(0, 8)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Depot</p>
+              <p className="text-sm font-semibold text-slate-800">{activeRouteData?.depot || 'DLA3'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Stops</p>
+              <p className="text-sm font-semibold text-slate-800">{activeRouteData?.stops || 119}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Vehicle</p>
+              <p className="text-sm font-semibold text-slate-800">VAN-{routeId.substring(8, 16).toUpperCase()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Distance</p>
+              <p className="text-sm font-semibold text-slate-800">142.6 km</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">ETA</p>
+              <p className="text-sm font-semibold text-slate-800">05h 43m</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Capacity</p>
+              <p className="text-sm font-semibold text-slate-800">{activeRouteData?.capacity_utilization_pct || 82}%</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Status</p>
+              <p className="text-sm font-bold text-green-600 flex items-center">
+                {isMonitoring ? <span className="animate-pulse flex items-center"><Activity size={14} className="mr-1" /> MONITORING</span> : <span className="text-slate-400">PAUSED</span>}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* MAP PANEL */}
+        <div className="col-span-8 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[300px]">
+          {mapSequence.length > 0 ? (
+             <MapViewer routeSequence={mapSequence} stopCoordinates={mapCoords} />
+          ) : (
+             <div className="flex items-center justify-center h-full text-slate-400">Loading Map Data...</div>
+          )}
+        </div>
+      </div>
+
+      {/* AI ROUTE MONITOR SECTION */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <Bot size={20} className="text-indigo-600" /> Event Engine Monitoring
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Automatically scans active routes to detect anomalies via XGBoost telemetry.
+          </p>
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={handleToggleMonitor} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors ${isMonitoring ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}>
+            {isMonitoring ? <><Square size={16}/> Pause</> : <><Play size={16}/> Start Automatic Monitoring</>}
+          </button>
+          
+          <button onClick={handleScanNow} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-2 transition-colors">
+            <RefreshCw size={16} /> Scan
+          </button>
+
+          <div className="w-px h-8 bg-slate-200 mx-1"></div>
+          
+          <button onClick={handleSimulateTraffic} className="px-4 py-2 rounded-lg text-sm font-bold bg-amber-50 text-amber-600 hover:bg-amber-100 flex items-center gap-2 transition-colors" title="Inject an artificial delay">
+            <Zap size={16} /> Force Demo Traffic Event
+          </button>
+        </div>
+      </div>
+
+      {/* AI DETECTED EVENTS */}
+      {autoEvents.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-sm font-bold text-slate-800 mb-3 uppercase tracking-wider">Detected Events on this Route</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {autoEvents.map((evt, idx) => (
+              <div key={idx} className="bg-red-50 border border-red-100 rounded-xl p-4 shadow-sm flex flex-col relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-2 h-full bg-red-400"></div>
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-red-800 font-bold text-base flex items-center gap-2">
+                    <AlertTriangle size={18} /> {EVENTS.find(e => e.type === evt.event_type)?.label || 'Anomaly Detected'}
+                  </h3>
+                  <span className="text-[10px] bg-red-200 text-red-800 px-2 py-0.5 rounded-full font-bold uppercase">{evt.severity} Severity</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 text-sm mt-3">
+                  <div className="text-red-900/70">Segment:</div>
+                  <div className="text-red-900 font-medium">{evt.affected_segment}</div>
+                  <div className="text-red-900/70">Delay Impact:</div>
+                  <div className="text-red-900 font-medium">+{evt.delay_mins} minutes</div>
+                  <div className="text-red-900/70">Status:</div>
+                  <div className="text-red-900 font-bold bg-white/50 px-2 rounded w-fit">{evt.status}</div>
+                </div>
+                
+                <div className="mt-4 flex gap-2">
+                  <Link to="/supervisor" className="text-xs bg-white text-red-600 font-bold px-3 py-1.5 rounded border border-red-200 hover:bg-red-50 transition-colors shadow-sm text-center block w-full">
+                    View Impact & Recommendation in Supervisor Console
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* EVENT GRID */}
+      <div className="flex items-center gap-2 mb-4">
+        <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Manual Event Simulation</h2>
+        <div className="flex-1 border-t border-slate-200"></div>
+      </div>
       <div className="grid grid-cols-6 gap-4 mb-8">
         {EVENTS.map(e => (
-          <button
-            key={e.type}
-            onClick={() => triggerEvent(e.type)}
-            disabled={loading}
-            className={`flex flex-col items-center justify-center p-5 bg-white border rounded-xl shadow-sm transition-all disabled:opacity-50 group cursor-pointer ${e.color}`}
-          >
+          <button key={e.type} onClick={() => triggerEvent(e.type)} disabled={loading} className={`flex flex-col items-center justify-center p-5 bg-white border rounded-xl shadow-sm transition-all disabled:opacity-50 group cursor-pointer ${e.color}`}>
             <div className="mb-3 transform group-hover:scale-110 transition-transform">{e.icon}</div>
             <span className="text-sm font-bold text-slate-800 text-center mb-1 leading-tight">{e.label}</span>
             <span className="text-[10px] text-slate-500 text-center px-1">{e.desc}</span>
-            {loading && activeEvent === e.type && (
-              <span className="text-xs text-indigo-500 mt-2 animate-pulse font-medium">Replanning...</span>
-            )}
+            {loading && activeEvent === e.type && <span className="text-xs text-indigo-500 mt-2 animate-pulse font-medium">Replanning...</span>}
           </button>
         ))}
       </div>
 
-      {/* Bottom Section */}
+      {/* BOTTOM */}
       <div className="grid grid-cols-12 gap-6">
-        
-        {/* Recent Simulations Table */}
         <div className="col-span-8 bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-slate-800 text-base">Recent Simulations</h3>
-            <select
-              className="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-lg px-2 py-1 shadow-sm focus:outline-none w-32"
-              value={routeId}
-              onChange={e => setRouteId(e.target.value)}
-            >
-              {routes.slice(0,10).map((r, i) => (
-                <option key={r.route_id} value={r.route_id}>
-                  {r.route_id.substring(0, 15)}...
-                </option>
-              ))}
-            </select>
-          </div>
-          
+          <h3 className="font-bold text-slate-800 text-base mb-4">Event History for Selected Route</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-slate-600">
               <thead className="text-xs text-slate-400 uppercase bg-slate-50/50">
                 <tr>
                   <th className="px-4 py-3 font-semibold rounded-tl-lg">Event Type</th>
-                  <th className="px-4 py-3 font-semibold">Route ID</th>
                   <th className="px-4 py-3 font-semibold">Time</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
                   <th className="px-4 py-3 font-semibold">Impact</th>
-                  <th className="px-4 py-3 font-semibold rounded-tr-lg"></th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-slate-50 hover:bg-slate-50/50">
-                  <td className="px-4 py-4 font-medium text-slate-800">New Pickup</td>
-                  <td className="px-4 py-4 font-mono text-xs text-slate-500">Route_00143bd</td>
-                  <td className="px-4 py-4 text-xs">10:42 AM</td>
-                  <td className="px-4 py-4"><span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full uppercase">Completed</span></td>
-                  <td className="px-4 py-4 text-xs font-medium text-slate-700">+4 min, +2.1 km</td>
-                  <td className="px-4 py-4 text-right"><button className="text-indigo-600 hover:text-indigo-800 text-xs font-semibold px-3 py-1 border border-indigo-200 rounded hover:bg-indigo-50 transition-colors">View</button></td>
-                </tr>
-                <tr className="border-b border-slate-50 hover:bg-slate-50/50">
-                  <td className="px-4 py-4 font-medium text-slate-800">Traffic Delay</td>
-                  <td className="px-4 py-4 font-mono text-xs text-slate-500">Route_00143bd</td>
-                  <td className="px-4 py-4 text-xs">09:15 AM</td>
-                  <td className="px-4 py-4"><span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full uppercase">Completed</span></td>
-                  <td className="px-4 py-4 text-xs font-medium text-slate-700">+7 min, +3.8 km</td>
-                  <td className="px-4 py-4 text-right"><button className="text-indigo-600 hover:text-indigo-800 text-xs font-semibold px-3 py-1 border border-indigo-200 rounded hover:bg-indigo-50 transition-colors">View</button></td>
-                </tr>
-                <tr className="border-b border-slate-50 hover:bg-slate-50/50">
-                  <td className="px-4 py-4 font-medium text-slate-800">Failed Delivery</td>
-                  <td className="px-4 py-4 font-mono text-xs text-slate-500">Route_80116ef</td>
-                  <td className="px-4 py-4 text-xs">Yesterday</td>
-                  <td className="px-4 py-4"><span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full uppercase">Completed</span></td>
-                  <td className="px-4 py-4 text-xs font-medium text-slate-700">-6 min, -2.4 km</td>
-                  <td className="px-4 py-4 text-right"><button className="text-indigo-600 hover:text-indigo-800 text-xs font-semibold px-3 py-1 border border-indigo-200 rounded hover:bg-indigo-50 transition-colors">View</button></td>
-                </tr>
+                {simulations.filter(s => s.route_id === routeId).length > 0 ? simulations.filter(s => s.route_id === routeId).map((sim, idx) => {
+                  const impact = sim.impact || {};
+                  return (
+                    <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50/50">
+                      <td className="px-4 py-4 font-medium text-slate-800">{EVENTS.find(e => e.type === sim.event_type)?.label || sim.event_type}</td>
+                      <td className="px-4 py-4 text-xs">{new Date(sim.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                      <td className="px-4 py-4 text-xs font-medium text-slate-700">{impact.time_difference_mins > 0 ? '+' : ''}{impact.time_difference_mins} min, {impact.distance_difference_km > 0 ? '+' : ''}{impact.distance_difference_km} km</td>
+                    </tr>
+                  );
+                }) : <tr><td colSpan="3" className="text-center py-4 text-sm text-slate-500">No events simulated for this route yet.</td></tr>}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* Last Simulation Result */}
         <div className="col-span-4 bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex flex-col">
-          <h3 className="font-bold text-slate-800 text-base mb-4 border-b border-slate-100 pb-3">Last Simulation Result</h3>
-          
+          <h3 className="font-bold text-slate-800 text-base mb-4 border-b border-slate-100 pb-3">Replanning Result</h3>
           <div className="flex-1">
-            <p className="text-sm text-slate-500 mb-2">Event: <strong className="text-slate-800">{result?.eventLabel || 'New Pickup Request'}</strong></p>
-            <p className="text-sm text-slate-500 mb-2 flex items-center">Status: <span className="ml-1 bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">Completed</span></p>
-            <p className="text-sm text-slate-500 mb-6">Replanned in: <strong className="text-slate-800">18.4 seconds</strong></p>
-            
-            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Impact Summary</h4>
-            <ul className="text-sm text-slate-600 space-y-2 list-disc pl-4 marker:text-slate-300">
-              <li>Added 1 pickup stop</li>
-              <li>Distance increased by 2.1 km</li>
-              <li>ETA increased by 4 minutes</li>
-              <li>No constraint violations</li>
-            </ul>
+            {result ? (
+              <>
+                <p className="text-sm text-slate-500 mb-2">Event: <strong className="text-slate-800">{result.eventLabel || result.event_type}</strong></p>
+                <p className="text-sm text-slate-500 mb-6">Replanned in: <strong className="text-slate-800">{result.event_impact?.replan_execution_sec || 0} seconds</strong></p>
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Impact Summary</h4>
+                <ul className="text-sm text-slate-600 space-y-2 list-disc pl-4 marker:text-slate-300">
+                  <li>Distance {result.event_impact?.distance_difference_km >= 0 ? 'increased' : 'decreased'} by {Math.abs(result.event_impact?.distance_difference_km || 0)} km</li>
+                  <li>ETA {result.event_impact?.time_difference_mins >= 0 ? 'increased' : 'decreased'} by {Math.abs(result.event_impact?.time_difference_mins || 0)} minutes</li>
+                </ul>
+              </>
+            ) : <p className="text-sm text-slate-500 text-center mt-10">Trigger an event to see the replanning impact.</p>}
           </div>
-
-          <button className="w-full mt-6 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold py-2.5 rounded shadow-sm transition-colors flex justify-center items-center">
-            <FileSearch size={14} className="mr-2" />
-            View Details
-          </button>
+          {result && <Link to="/supervisor" className="w-full mt-6 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2.5 rounded shadow-sm transition-colors flex justify-center items-center"><CheckCircle2 size={14} className="mr-2" /> Review in Supervisor Console <ArrowRight size={14} className="ml-2" /></Link>}
         </div>
-
       </div>
     </div>
   );

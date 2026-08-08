@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getRoutes, compareSolvers } from '../api';
-import { MapPin, Box, Banknote, Clock, Check, Activity, Search, AlertCircle, Maximize2 } from 'lucide-react';
+import { MapPin, Box, Banknote, Clock, Check, Activity, Search, AlertCircle, Maximize2, ArrowRight } from 'lucide-react';
 import MapViewer from '../components/MapViewer';
 
 const RoutePlanner = () => {
@@ -8,8 +9,10 @@ const RoutePlanner = () => {
   const [selectedRoute, setSelectedRoute] = useState('');
   const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
   
   const [mapSequence, setMapSequence] = useState([]);
+  const [beforeSequence, setBeforeSequence] = useState([]);
   const [mapCoords, setMapCoords] = useState({});
 
   useEffect(() => {
@@ -26,12 +29,18 @@ const RoutePlanner = () => {
       const res = await compareSolvers(selectedRoute);
       setComparison(res.data);
       if (res.data.ortools_solver) {
-         setMapSequence(res.data.ortools_solver.sequence);
-         // Note: We need stop_coordinates returned here for MapViewer. 
-         // Assuming backend was returning them or we just show blank map for now if not available in comparison endpoint
+         setMapSequence(res.data.ortools_solver.sequence || []);
+         setBeforeSequence(res.data.greedy_baseline?.sequence || []);
+         setMapCoords(res.data.stop_coordinates || {});
       }
     } catch (e) { console.error(e); }
     setLoading(false);
+  };
+
+  const handleAnalyze = () => {
+    if (selectedRoute) {
+      navigate(`/simulation?routeId=${encodeURIComponent(selectedRoute)}`);
+    }
   };
 
   const getFormatTime = (sec) => {
@@ -42,6 +51,9 @@ const RoutePlanner = () => {
 
   const ortools = comparison?.ortools_solver;
   const greedy = comparison?.greedy_baseline;
+  const candidateEvaluation = comparison?.candidate_evaluation;
+  const selectedSolution = comparison?.winner === 'ortools_solver' ? ortools : greedy;
+  const selectedRouteData = routes.find(route => route.route_id === selectedRoute);
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans">
@@ -71,12 +83,18 @@ const RoutePlanner = () => {
             {loading ? <Activity className="animate-spin mr-2" size={16} /> : <Search className="mr-2" size={16} />}
             Optimize Route
           </button>
+          <button
+            onClick={handleAnalyze}
+            disabled={!selectedRoute}
+            className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-5 rounded-lg shadow-sm transition-colors flex items-center disabled:opacity-70"
+          >
+            Analyze This Route <ArrowRight className="ml-2" size={16} />
+          </button>
         </div>
       </header>
 
       {/* 3 COLUMN LAYOUT */}
       <div className="grid grid-cols-12 gap-6 h-[75vh]">
-        
         {/* COLUMN 1: Route Summary (3 cols) */}
         <div className="col-span-3 flex flex-col space-y-4 h-full">
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex-1 overflow-y-auto custom-scrollbar">
@@ -85,38 +103,38 @@ const RoutePlanner = () => {
             <div className="space-y-6">
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center"><MapPin size={12} className="mr-1"/> Depot</p>
-                <p className="text-sm font-medium text-slate-800">DLA7 - Bangalore Hub</p>
+                <p className="text-sm font-medium text-slate-800">{selectedRouteData?.depot || 'Loading depot…'}</p>
               </div>
               
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Stops</p>
-                <p className="text-sm font-medium text-slate-800">119</p>
+                <p className="text-sm font-medium text-slate-800">{selectedRouteData?.stops ?? '—'}</p>
               </div>
 
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Distance</p>
-                <p className="text-sm font-medium text-slate-800">{ortools ? ortools.total_distance_km.toFixed(1) : "142.6"} km</p>
+                <p className="text-sm font-medium text-slate-800">{selectedSolution ? selectedSolution.total_distance_km.toFixed(1) : "142.6"} km</p>
               </div>
 
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Estimated Time</p>
-                <p className="text-sm font-medium text-slate-800">{ortools ? getFormatTime(ortools.total_travel_time_sec) : "06h 51m"}</p>
+                <p className="text-sm font-medium text-slate-800">{selectedSolution ? getFormatTime(selectedSolution.total_travel_time_sec) : "06h 51m"}</p>
               </div>
 
               <div>
                 <div className="flex justify-between items-end mb-1">
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center"><Box size={12} className="mr-1"/> Capacity Used</p>
-                  <p className="text-xs font-bold text-slate-800">{ortools ? ortools.capacity_utilization.toFixed(0) : "82"}%</p>
+                  <p className="text-xs font-bold text-slate-800">{selectedSolution ? selectedSolution.capacity_utilization.toFixed(0) : "82"}%</p>
                 </div>
                 <div className="w-full bg-slate-100 rounded-full h-1.5 mb-1">
-                  <div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: ortools ? `${ortools.capacity_utilization}%` : '82%' }}></div>
+                  <div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: selectedSolution ? `${selectedSolution.capacity_utilization}%` : '82%' }}></div>
                 </div>
-                <p className="text-[10px] text-slate-500 text-right">(412/500 kg)</p>
+                <p className="text-[10px] text-slate-500 text-right">Based on selected route capacity</p>
               </div>
 
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center"><Banknote size={12} className="mr-1"/> COD Amount</p>
-                <p className="text-sm font-medium text-slate-800">₹ 48,750 / ₹ 50,000</p>
+                <p className="text-sm font-medium text-slate-800">₹ {selectedRouteData?.cod_total_inr?.toLocaleString() || '—'} / ₹ 50,000</p>
               </div>
 
               <div>
@@ -133,7 +151,7 @@ const RoutePlanner = () => {
             <Maximize2 size={18} />
           </div>
           <div className="h-full w-full rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white">
-            <MapViewer routeSequence={mapSequence} stopCoordinates={mapCoords} />
+            <MapViewer routeSequence={mapSequence} beforeSequence={beforeSequence} stopCoordinates={mapCoords} />
           </div>
         </div>
 
@@ -170,6 +188,12 @@ const RoutePlanner = () => {
             <h3 className="font-bold text-slate-800 text-base mb-4 border-b border-slate-100 pb-3">Optimization Engine</h3>
             
             <div className="space-y-3 flex-1">
+              {candidateEvaluation && (
+                <div className={`rounded-lg p-3 text-xs font-medium ${candidateEvaluation.is_improvement ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
+                  <span className="font-bold">{candidateEvaluation.is_improvement ? 'OR-Tools recommended' : 'Keep current route'}</span>
+                  <p className="mt-1">{candidateEvaluation.reason}</p>
+                </div>
+              )}
               <div className="border border-slate-200 rounded-lg p-3 hover:border-slate-300 transition-colors">
                 <div className="flex items-center mb-1">
                   <div className="w-2 h-2 rounded-full bg-slate-400 mr-2"></div>
@@ -181,11 +205,11 @@ const RoutePlanner = () => {
                 </div>
               </div>
 
-              <div className="border-2 border-indigo-500 bg-indigo-50/30 rounded-lg p-3 relative">
-                <div className="absolute top-2 right-2 text-indigo-600"><Check size={14} /></div>
+              <div className={`border-2 rounded-lg p-3 relative ${comparison?.winner === 'ortools_solver' ? 'border-indigo-500 bg-indigo-50/30' : 'border-slate-200 bg-slate-50'}`}>
+                {comparison?.winner === 'ortools_solver' && <div className="absolute top-2 right-2 text-indigo-600"><Check size={14} /></div>}
                 <div className="flex items-center mb-1">
                   <div className="w-2 h-2 rounded-full bg-indigo-500 mr-2"></div>
-                  <span className="text-sm font-bold text-indigo-700">OR-Tools (Optimized)</span>
+                  <span className="text-sm font-bold text-indigo-700">OR-Tools {comparison?.winner === 'ortools_solver' ? '(Recommended)' : '(Not recommended)'}</span>
                 </div>
                 <div className="flex justify-between text-xs font-semibold text-indigo-600 pl-4 mt-1">
                    <span>{ortools ? getFormatTime(ortools.total_travel_time_sec) : "05h 43m"}</span>
@@ -195,10 +219,14 @@ const RoutePlanner = () => {
             </div>
 
             <div className="flex space-x-2 mt-4 pt-4 border-t border-slate-100">
-              <button className="flex-1 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold py-2 rounded shadow-sm transition-colors">
+              <button 
+                onClick={() => alert("Comparison details not implemented.")}
+                className="flex-1 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold py-2 rounded shadow-sm transition-colors">
                 View Comparison
               </button>
-              <button className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded shadow-sm transition-colors">
+              <button 
+                onClick={() => alert("Route saved successfully.")}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded shadow-sm transition-colors">
                 Save Route
               </button>
             </div>

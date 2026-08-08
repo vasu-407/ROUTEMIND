@@ -11,7 +11,7 @@ const Vehicles = () => {
     getRoutes().then(res => {
       // Map live routes to active vehicles
       const mappedVehicles = res.data.map((r, i) => ({
-        id: `VAN-${r.route_id.substring(0, 8).toUpperCase()}`,
+        id: `VAN-${r.route_id.substring(8, 16).toUpperCase()}`,
         type: 'Delivery Van',
         capacity: '2,800,000 cm³',
         station: r.station_code || 'Unknown',

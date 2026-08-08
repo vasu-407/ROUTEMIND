@@ -1,9 +1,10 @@
-/**
+/**
  * Dashboard Routes
  */
 const express = require('express');
 const router = express.Router();
 const proxy = require('../services/pythonProxy');
+const monitor = require('../services/monitor');
 const OptimizationLog = require('../models/OptimizationLog');
 
 // GET /api/dashboard
@@ -31,6 +32,17 @@ router.get('/routes', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: 'Optimization service unavailable', detail: err.message });
+  }
+});
+
+// GET /api/routes/:routeId/map
+router.get('/routes/:routeId/map', async (req, res) => {
+  try {
+    const { data } = await proxy.getRouteMap(req.params.routeId);
+    res.json(data);
+  } catch (err) {
+    const status = err.response?.status || 502;
+    res.status(status).json({ error: 'Route map unavailable', detail: err.message });
   }
 });
 
@@ -95,6 +107,16 @@ router.post('/simulate-event', async (req, res) => {
   }
 });
 
+// GET /api/simulations
+router.get('/simulations', async (req, res) => {
+  try {
+    const { data } = await proxy.getSimulations();
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Simulations fetch failed', detail: err.message });
+  }
+});
+
 // GET /api/comparison
 router.get('/comparison', async (req, res) => {
   const { route_id } = req.query;
@@ -110,13 +132,8 @@ router.get('/comparison', async (req, res) => {
 // GET /api/analytics
 router.get('/analytics', async (req, res) => {
   try {
-    const logs = await OptimizationLog.find().sort({ timestamp: -1 }).limit(50);
-    const total = await OptimizationLog.countDocuments();
-
-    res.json({
-      total_optimizations: total,
-      recent_logs: logs,
-    });
+    const { data } = await proxy.getAnalytics();
+    res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Analytics query failed', detail: err.message });
   }
@@ -139,6 +156,77 @@ router.post('/ml/predict', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: 'ML prediction failed', detail: err.message });
+  }
+});
+
+// GET /api/supervisor/pending
+router.get('/supervisor/pending', async (req, res) => {
+  try {
+    const { data } = await proxy.getPendingApprovals();
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to fetch pending approvals', detail: err.message });
+  }
+});
+
+// POST /api/supervisor/approve
+router.post('/supervisor/approve', async (req, res) => {
+  try {
+    const { data } = await proxy.approveRoute(req.body);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Approval action failed', detail: err.message });
+  }
+});
+
+// POST /api/copilot
+router.post('/copilot', async (req, res) => {
+  try {
+    const { data } = await proxy.askCopilot(req.body);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Copilot query failed', detail: err.message });
+  }
+});
+
+// ── Monitor and Demo Routes ─────────────────────────────────
+
+router.post('/monitor/start', (req, res) => {
+  res.json(monitor.start());
+});
+
+router.post('/monitor/stop', (req, res) => {
+  res.json(monitor.stop());
+});
+
+router.post('/monitor/scan', async (req, res) => {
+  try {
+    const data = await monitor.scanNow();
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Manual scan failed', detail: err.message });
+  }
+});
+
+router.get('/monitor/status', (req, res) => {
+  res.json(monitor.getStatus());
+});
+
+router.get('/monitor/events', async (req, res) => {
+  try {
+    const { data } = await proxy.getMonitorEvents();
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to fetch monitor events', detail: err.message });
+  }
+});
+
+router.post('/demo/traffic', async (req, res) => {
+  try {
+    const { data } = await proxy.demoTraffic(req.body);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Demo traffic injection failed', detail: err.message });
   }
 });
 
