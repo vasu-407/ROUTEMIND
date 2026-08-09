@@ -1,26 +1,137 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getRoutes, compareSolvers } from '../api';
-import { MapPin, Box, Banknote, Clock, Check, Activity, Search, AlertCircle, Maximize2, ArrowRight, Navigation } from 'lucide-react';
+import { MapPin, Box, Banknote, Clock, Check, Activity, Search, AlertCircle, Maximize2, ArrowRight, Navigation, Map as MapIcon } from 'lucide-react';
 import MapViewer from '../components/MapViewer';
 
 const RoutePlanner = () => {
   const [routes, setRoutes] = useState([]);
-  const [selectedRoute, setSelectedRoute] = useState('');
-  const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  
-  const [mapSequence, setMapSequence] = useState([]);
-  const [beforeSequence, setBeforeSequence] = useState([]);
-  const [mapCoords, setMapCoords] = useState({});
+
+  // Load initial state from sessionStorage
+  const [selectedRoute, setSelectedRoute] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('route_planner_state');
+      if (saved) {
+        return JSON.parse(saved).selectedRoute || '';
+      }
+    } catch (e) {}
+    return '';
+  });
+
+  const [comparison, setComparison] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('route_planner_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const active = parsed.selectedRoute;
+        if (active && parsed.cache && parsed.cache[active]) {
+          return parsed.cache[active].comparison || null;
+        }
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  const [mapSequence, setMapSequence] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('route_planner_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const active = parsed.selectedRoute;
+        if (active && parsed.cache && parsed.cache[active]) {
+          return parsed.cache[active].mapSequence || [];
+        }
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  const [beforeSequence, setBeforeSequence] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('route_planner_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const active = parsed.selectedRoute;
+        if (active && parsed.cache && parsed.cache[active]) {
+          return parsed.cache[active].beforeSequence || [];
+        }
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  const [mapCoords, setMapCoords] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('route_planner_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const active = parsed.selectedRoute;
+        if (active && parsed.cache && parsed.cache[active]) {
+          return parsed.cache[active].mapCoords || {};
+        }
+      }
+    } catch (e) {}
+    return {};
+  });
+
+  // Helper to update sessionStorage
+  const savePlannerState = (routeId, data = null) => {
+    try {
+      const saved = sessionStorage.getItem('route_planner_state');
+      const parsed = saved ? JSON.parse(saved) : { selectedRoute: '', cache: {} };
+      parsed.selectedRoute = routeId;
+      if (data) {
+        parsed.cache[routeId] = data;
+      }
+      sessionStorage.setItem('route_planner_state', JSON.stringify(parsed));
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   useEffect(() => {
     getRoutes().then(res => {
       setRoutes(res.data);
-      if (res.data.length > 0) setSelectedRoute(res.data[0].route_id);
+      if (res.data.length > 0) {
+        setSelectedRoute(prev => {
+          if (prev) return prev;
+          const defaultRoute = res.data[0].route_id;
+          savePlannerState(defaultRoute);
+          return defaultRoute;
+        });
+      }
     }).catch(console.error);
   }, []);
+
+  const handleRouteChange = (routeId) => {
+    setSelectedRoute(routeId);
+
+    // Try loading cached optimization data for this route
+    try {
+      const saved = sessionStorage.getItem('route_planner_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.cache && parsed.cache[routeId]) {
+          const cached = parsed.cache[routeId];
+          setComparison(cached.comparison);
+          setMapSequence(cached.mapSequence);
+          setBeforeSequence(cached.beforeSequence);
+          setMapCoords(cached.mapCoords);
+          savePlannerState(routeId);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    // No cache: reset optimization display state
+    setComparison(null);
+    setMapSequence([]);
+    setBeforeSequence([]);
+    setMapCoords({});
+    savePlannerState(routeId);
+  };
 
   const handleOptimize = async () => {
     if (!selectedRoute) return;
@@ -29,9 +140,20 @@ const RoutePlanner = () => {
       const res = await compareSolvers(selectedRoute);
       setComparison(res.data);
       if (res.data.ortools_solver) {
-         setMapSequence(res.data.ortools_solver.sequence || []);
-         setBeforeSequence(res.data.greedy_baseline?.sequence || []);
-         setMapCoords(res.data.stop_coordinates || {});
+         const newMapSeq = res.data.ortools_solver.sequence || [];
+         const newBeforeSeq = res.data.greedy_baseline?.sequence || [];
+         const newCoords = res.data.stop_coordinates || {};
+
+         setMapSequence(newMapSeq);
+         setBeforeSequence(newBeforeSeq);
+         setMapCoords(newCoords);
+
+         savePlannerState(selectedRoute, {
+           comparison: res.data,
+           mapSequence: newMapSeq,
+           beforeSequence: newBeforeSeq,
+           mapCoords: newCoords
+         });
       }
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -55,6 +177,26 @@ const RoutePlanner = () => {
   const selectedSolution = comparison?.winner === 'ortools_solver' ? ortools : greedy;
   const selectedRouteData = routes.find(route => route.route_id === selectedRoute);
 
+  const totalStops = selectedRouteData?.stops || 0;
+  const [visibleCount, setVisibleCount] = useState(0);
+  const [fitTrigger, setFitTrigger] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (totalStops > 0) {
+      setVisibleCount(totalStops);
+    }
+  }, [selectedRoute, totalStops]);
+
+  const handleFitToStops = () => {
+    setFitTrigger(prev => prev + 1);
+  };
+
+  const handleViewMap = () => {
+    setIsFullscreen(true);
+    setFitTrigger(prev => prev + 1);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans">
       {/* HEADER */}
@@ -67,7 +209,7 @@ const RoutePlanner = () => {
           <select
             className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 shadow-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-64"
             value={selectedRoute}
-            onChange={e => setSelectedRoute(e.target.value)}
+            onChange={e => handleRouteChange(e.target.value)}
           >
             {routes.map((r, i) => (
               <option key={r.route_id} value={r.route_id}>
@@ -146,12 +288,73 @@ const RoutePlanner = () => {
         </div>
 
         {/* COLUMN 2: Map (6 cols) */}
-        <div className="col-span-6 h-full relative group">
-          <div className="absolute top-4 right-4 z-10 bg-white p-2 rounded shadow text-slate-600 cursor-pointer hover:text-indigo-600 transition-colors">
-            <Maximize2 size={18} />
+        <div className="col-span-6 flex flex-col space-y-4 h-full relative group">
+          {/* STOPS TO DISPLAY CONTROL CARD */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+            <div className="flex flex-col space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-bold text-slate-800">Stops to Display</span>
+                <span className="text-sm font-extrabold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full">
+                  {visibleCount} / {totalStops}
+                </span>
+              </div>
+              
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setVisibleCount(prev => Math.max(0, prev - 1))}
+                  className="w-8 h-8 flex items-center justify-center bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg text-slate-700 font-extrabold text-base transition-colors"
+                >
+                  −
+                </button>
+                
+                <input
+                  type="range"
+                  min="0"
+                  max={totalStops}
+                  value={visibleCount}
+                  onChange={e => setVisibleCount(parseInt(e.target.value) || 0)}
+                  className="flex-1 accent-indigo-600 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                />
+                
+                <button
+                  onClick={() => setVisibleCount(prev => Math.min(totalStops, prev + 1))}
+                  className="w-8 h-8 flex items-center justify-center bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg text-slate-700 font-extrabold text-base transition-colors"
+                >
+                  +
+                </button>
+              </div>
+
+              <div className="flex space-x-3 pt-1">
+                <button
+                  onClick={handleFitToStops}
+                  className="flex-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold py-2 px-3 rounded-lg shadow-sm transition-colors"
+                >
+                  Fit to Stops
+                </button>
+                <button
+                  onClick={handleViewMap}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm transition-colors flex items-center justify-center"
+                >
+                  <MapIcon size={12} className="mr-1.5" /> View Map
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="h-full w-full rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white">
-            <MapViewer routeSequence={mapSequence} beforeSequence={beforeSequence} stopCoordinates={mapCoords} />
+
+          <div className="flex-1 w-full rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white relative">
+            <div 
+              onClick={handleViewMap}
+              className="absolute top-4 right-4 z-10 bg-white p-2 rounded shadow text-slate-600 cursor-pointer hover:text-indigo-600 transition-colors"
+            >
+              <Maximize2 size={18} />
+            </div>
+            <MapViewer 
+              routeSequence={mapSequence} 
+              beforeSequence={beforeSequence} 
+              stopCoordinates={mapCoords} 
+              visibleCount={visibleCount}
+              fitTrigger={fitTrigger}
+            />
           </div>
         </div>
 
@@ -241,9 +444,56 @@ const RoutePlanner = () => {
             </div>
           </div>
           
-        </div>
-
       </div>
+      </div>
+
+      {/* FULLSCREEN MAP MODAL OVERLAY */}
+      {isFullscreen && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full h-full rounded-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col relative animate-in fade-in zoom-in-95 duration-200">
+            {/* Fullscreen Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white shrink-0">
+              <div>
+                <h3 className="font-bold text-slate-800 text-lg flex items-center">
+                  <MapIcon className="text-indigo-600 mr-2" size={20} /> Full Route Map View
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">Route {selectedRouteData?.route_id || 'Active'} • Displaying {visibleCount} / {totalStops} stops</p>
+              </div>
+              <div className="flex items-center space-x-4">
+                {/* Fullscreen progressive control slider */}
+                <div className="flex items-center bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 text-xs font-semibold text-slate-600">
+                  <span className="mr-3">Stops:</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max={totalStops}
+                    value={visibleCount}
+                    onChange={e => setVisibleCount(parseInt(e.target.value) || 0)}
+                    className="accent-indigo-600 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer w-48"
+                  />
+                  <span className="ml-3 font-bold text-indigo-600">{visibleCount} / {totalStops}</span>
+                </div>
+                <button
+                  onClick={() => setIsFullscreen(false)}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-4 py-2 rounded-lg transition-colors border border-slate-200 shadow-sm"
+                >
+                  Close View
+                </button>
+              </div>
+            </div>
+            {/* Map Area */}
+            <div className="flex-1 w-full relative bg-slate-50">
+              <MapViewer 
+                routeSequence={mapSequence} 
+                beforeSequence={beforeSequence} 
+                stopCoordinates={mapCoords} 
+                visibleCount={visibleCount}
+                fitTrigger={fitTrigger}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

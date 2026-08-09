@@ -54,6 +54,10 @@ class GreedyBaseline:
         metrics["execution_time_ms"] = execution_time_ms
         return metrics
 
+    def solve(self, route: Route) -> dict:
+        """Alias for optimize() — used by benchmark and analytics seeder."""
+        return self.optimize(route)
+
     def _build_empty_response(self, route):
         seq = list(route.stops.keys())
         metrics = sequence_totals(route, seq) if len(seq) > 1 else {

@@ -14,15 +14,43 @@ const EVENTS = [
 ];
 
 const Simulation = () => {
-  const [searchParams] = useSearchParams();
-  const routeId = searchParams.get('routeId');
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  const routeId = React.useMemo(() => {
+    const urlId = searchParams.get('routeId');
+    if (urlId) return urlId;
+    try {
+      const saved = sessionStorage.getItem('route_planner_state');
+      if (saved) {
+        return JSON.parse(saved).selectedRoute || null;
+      }
+    } catch (e) {}
+    return null;
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (routeId && !searchParams.get('routeId')) {
+      setSearchParams({ routeId });
+    }
+  }, [routeId, searchParams, setSearchParams]);
   
   const [routes, setRoutes] = useState([]);
   const [activeRouteData, setActiveRouteData] = useState(null);
   const [mapSequence, setMapSequence] = useState([]);
+  const [beforeSequence, setBeforeSequence] = useState([]);
   const [mapCoords, setMapCoords] = useState({});
-  
   const [result, setResult] = useState(null);
+
+  const saveSimulationState = (rId, data) => {
+    try {
+      const saved = sessionStorage.getItem('simulation_page_state');
+      const parsed = saved ? JSON.parse(saved) : {};
+      parsed[rId] = data;
+      sessionStorage.setItem('simulation_page_state', JSON.stringify(parsed));
+    } catch (e) {
+      console.error(e);
+    }
+  };
   const [loading, setLoading] = useState(false);
   const [activeEvent, setActiveEvent] = useState(null);
   const [simulations, setSimulations] = useState([]);
@@ -39,10 +67,41 @@ const Simulation = () => {
       }
     }).catch(console.error);
 
-    if (routeId) {
+    let loadedFromCache = false;
+    try {
+      const simSaved = sessionStorage.getItem('simulation_page_state');
+      if (simSaved) {
+        const parsed = JSON.parse(simSaved);
+        if (parsed[routeId]) {
+          setMapSequence(parsed[routeId].mapSequence || []);
+          setBeforeSequence(parsed[routeId].beforeSequence || []);
+          setMapCoords(parsed[routeId].mapCoords || {});
+          setResult(parsed[routeId].result || null);
+          loadedFromCache = true;
+        }
+      }
+      
+      if (!loadedFromCache) {
+        const plannerSaved = sessionStorage.getItem('route_planner_state');
+        if (plannerSaved) {
+          const parsed = JSON.parse(plannerSaved);
+          if (parsed.cache && parsed.cache[routeId]) {
+            setMapSequence(parsed.cache[routeId].mapSequence || []);
+            setBeforeSequence([]);
+            setMapCoords(parsed.cache[routeId].mapCoords || {});
+            setResult(null);
+            loadedFromCache = true;
+          }
+        }
+      }
+    } catch (e) {}
+
+    if (routeId && !loadedFromCache) {
       getRouteMap(routeId).then(res => {
         setMapSequence(res.data.sequence || []);
+        setBeforeSequence([]);
         setMapCoords(res.data.stop_coordinates || {});
+        setResult(null);
       }).catch(console.error);
     }
     
@@ -93,11 +152,30 @@ const Simulation = () => {
     try {
       const payload = { route_id: routeId, event_type: eventType, data: {} };
       const res = await replanEvent(payload);
-      setResult({ 
+      
+      const eventLabel = EVENTS.find(e => e.type === eventType)?.label;
+      const newResult = { 
         eventType, 
-        eventLabel: EVENTS.find(e => e.type === eventType)?.label,
+        eventLabel,
         ...res.data 
+      };
+      
+      setResult(newResult);
+      
+      const newMapSeq = res.data.event_impact?.after_sequence || mapSequence;
+      const newBeforeSeq = res.data.event_impact?.before_sequence || [];
+      const newCoords = res.data.stop_coordinates || mapCoords;
+      setMapSequence(newMapSeq);
+      setBeforeSequence(newBeforeSeq);
+      setMapCoords(newCoords);
+
+      saveSimulationState(routeId, {
+        mapSequence: newMapSeq,
+        beforeSequence: newBeforeSeq,
+        mapCoords: newCoords,
+        result: newResult
       });
+
       getSimulations().then(res => setSimulations(res.data)).catch(console.error);
     } catch (e) {
       setResult({ error: 'Event simulation failed. Is the backend running?' });
@@ -238,6 +316,7 @@ const Simulation = () => {
           {activeRouteData && mapSequence.length > 0 ? (
              <MapViewer 
                 routeSequence={mapSequence} 
+                beforeSequence={beforeSequence}
                 stopCoordinates={mapCoords} 
                 focusedSegment={autoEvents.length > 0 ? autoEvents[0].affected_segment.split('->').map(s => s.trim()) : null}
              />

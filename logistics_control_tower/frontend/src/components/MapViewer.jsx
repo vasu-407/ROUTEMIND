@@ -12,13 +12,32 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-const MapUpdater = ({ positions }) => {
+// MapUpdater to handle both automatic scrubbing snaps and animated fitBounds clicks
+const MapUpdater = ({ positions, fitTrigger, visibleCount, depotPosition }) => {
   const map = useMap();
+
+  // 1. Manual Animated fitBounds (View Map or Fit to Stops button)
   useEffect(() => {
-    if (positions.length > 1) {
-      map.fitBounds(L.latLngBounds(positions), { padding: [60, 60] });
+    if (fitTrigger > 0) {
+      if (positions.length > 0) {
+        const bounds = L.latLngBounds(positions);
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14, animate: true, duration: 0.8 });
+      } else if (depotPosition) {
+        map.setView(depotPosition, 14, { animate: true });
+      }
     }
-  }, [positions, map]);
+  }, [fitTrigger, map]);
+
+  // 2. Instant Scrubbing Snap (without animation to avoid jumps during dragging)
+  useEffect(() => {
+    if (positions.length > 0) {
+      const bounds = L.latLngBounds(positions);
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14, animate: false });
+    } else if (depotPosition) {
+      map.setView(depotPosition, 14, { animate: false });
+    }
+  }, [positions, map, depotPosition]);
+
   return null;
 };
 
@@ -36,7 +55,7 @@ const createIcon = (htmlContent, size = [32, 32], anchor = [16, 16], className =
 // SVG Helpers
 const svgDepot = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-white"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>`;
 const svgPickup = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-white"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>`;
-const svgVehicle = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><rect width="18" height="14" x="3" y="5" rx="2"></rect><path d="M7 15h4M15 15h2M7 9h10"></path></svg>`; 
+const svgVehicle = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><rect width="18" height="14" x="3" y="5" rx="2"></rect><path d="M7 15h4M15 15h2M7 9h10"></path></svg>`;
 
 const getDepotIcon = () => createIcon(`
   <div class="flex items-center justify-center w-8 h-8 bg-green-500 rounded-full shadow-lg border-2 border-white ring-4 ring-green-100">
@@ -68,7 +87,13 @@ const getVehicleIcon = () => createIcon(`
   </div>
 `, [36, 36], [18, 18]);
 
-// --- API Logic from existing ---
+const getClusterIcon = (count) => createIcon(`
+  <div class="flex items-center justify-center w-8 h-8 bg-purple-700 rounded-full shadow-lg border-2 border-white text-white text-xs font-bold ring-4 ring-purple-100 animate-pulse">
+    ${count}
+  </div>
+`, [32, 32], [16, 16]);
+
+// --- API Logic for OSRM Road routing ---
 const splitWaypoints = (positions, size = 25) => {
   const chunks = [];
   for (let start = 0; start < positions.length - 1; start += size - 1) {
@@ -92,28 +117,35 @@ const roadGeometry = async (positions) => {
 const EMPTY_ARRAY = [];
 const EMPTY_OBJECT = {};
 
-const MapViewer = ({ routeSequence = EMPTY_ARRAY, beforeSequence = EMPTY_ARRAY, stopCoordinates = EMPTY_OBJECT }) => {
+const MapViewer = ({ 
+  routeSequence = EMPTY_ARRAY, 
+  beforeSequence = EMPTY_ARRAY, 
+  stopCoordinates = EMPTY_OBJECT,
+  visibleCount = 9999,
+  fitTrigger = 0
+}) => {
   const [roadPositions, setRoadPositions] = useState([]);
   const [beforeRoadPositions, setBeforeRoadPositions] = useState([]);
   const [mapType, setMapType] = useState('map'); // 'map' or 'satellite'
 
-  const rawPositions = useMemo(
+  // Fetch OSRM Road Geometry only for the original FULL route coordinates, preventing API calls during slider scrubbing
+  const fullRawPositions = useMemo(
     () => routeSequence.map(id => stopCoordinates[id]).filter(Boolean),
     [routeSequence, stopCoordinates]
   );
-  const beforePositions = useMemo(
+  const fullBeforePositions = useMemo(
     () => beforeSequence.map(id => stopCoordinates[id]).filter(Boolean),
     [beforeSequence, stopCoordinates]
   );
 
   useEffect(() => {
-    if (rawPositions.length < 2) {
+    if (fullRawPositions.length < 2) {
       setRoadPositions([]);
       setBeforeRoadPositions([]);
       return undefined;
     }
     let cancelled = false;
-    Promise.all([roadGeometry(rawPositions), roadGeometry(beforePositions)])
+    Promise.all([roadGeometry(fullRawPositions), roadGeometry(fullBeforePositions)])
       .then(([orToolsRoad, greedyRoad]) => {
         if (!cancelled) {
           setRoadPositions(orToolsRoad);
@@ -127,12 +159,117 @@ const MapViewer = ({ routeSequence = EMPTY_ARRAY, beforeSequence = EMPTY_ARRAY, 
         }
       });
     return () => { cancelled = true; };
-  }, [rawPositions, beforePositions]);
+  }, [fullRawPositions, fullBeforePositions]);
 
-  const displayPositions = roadPositions.length > 1 ? roadPositions : rawPositions;
-  const displayBeforePositions = beforeRoadPositions.length > 1 ? beforeRoadPositions : beforePositions;
+  // Sliced sequence based on visibleCount
+  const slicedRouteSequence = useMemo(() => {
+    if (routeSequence.length === 0) return EMPTY_ARRAY;
+    if (visibleCount === 0) return [routeSequence[0]];
+    if (visibleCount >= routeSequence.length - 1) return routeSequence;
+    return routeSequence.slice(0, visibleCount + 1);
+  }, [routeSequence, visibleCount]);
 
-  // Render Map Overlay components inside the relative container
+  const slicedBeforeSequence = useMemo(() => {
+    if (beforeSequence.length === 0) return EMPTY_ARRAY;
+    if (visibleCount === 0) return [beforeSequence[0]];
+    if (visibleCount >= beforeSequence.length - 1) return beforeSequence;
+    return beforeSequence.slice(0, visibleCount + 1);
+  }, [beforeSequence, visibleCount]);
+
+  // Display Polyline: Use OSRM road geometry for full view, straight lines during slider changes to avoid API calls
+  const displayPositions = useMemo(() => {
+    if (visibleCount >= routeSequence.length - 1 && roadPositions.length > 1) {
+      return roadPositions;
+    }
+    return slicedRouteSequence.map(id => stopCoordinates[id]).filter(Boolean);
+  }, [visibleCount, routeSequence, roadPositions, slicedRouteSequence, stopCoordinates]);
+
+  const displayBeforePositions = useMemo(() => {
+    if (visibleCount >= beforeSequence.length - 1 && beforeRoadPositions.length > 1) {
+      return beforeRoadPositions;
+    }
+    return slicedBeforeSequence.map(id => stopCoordinates[id]).filter(Boolean);
+  }, [visibleCount, beforeSequence, beforeRoadPositions, slicedBeforeSequence, stopCoordinates]);
+
+  // Markers filtering and custom clustering
+  const stopsToRender = useMemo(() => {
+    const list = [];
+    if (routeSequence.length === 0) return list;
+    const depotId = routeSequence[0];
+    const vehicleId = routeSequence[routeSequence.length - 1];
+
+    if (depotId) list.push({ id: depotId, originalIndex: 0, type: 'depot' });
+
+    routeSequence.forEach((stopId, idx) => {
+      if (idx === 0 || idx === routeSequence.length - 1) return;
+      if (idx <= visibleCount) {
+        list.push({ id: stopId, originalIndex: idx, type: 'stop' });
+      }
+    });
+
+    if (vehicleId && vehicleId !== depotId) {
+      list.push({ id: vehicleId, originalIndex: routeSequence.length - 1, type: 'vehicle' });
+    }
+
+    return list;
+  }, [routeSequence, visibleCount]);
+
+  // Clustered delivery stops (purple markers only)
+  const clusteredDeliveryStops = useMemo(() => {
+    const deliveryStops = stopsToRender.filter(s => {
+      const idx = s.originalIndex;
+      const isDepot = idx === 0;
+      const isLast = idx === routeSequence.length - 1;
+      const isPickup = idx === 2;
+      const isDelayed = idx === routeSequence.length - 2 && routeSequence.length > 3;
+      return !isDepot && !isLast && !isPickup && !isDelayed;
+    });
+
+    const threshold = 0.0035; // Grouping distance delta
+    const clusters = [];
+
+    deliveryStops.forEach(item => {
+      const coords = stopCoordinates[item.id];
+      if (!coords) return;
+      const [lat, lng] = coords;
+
+      let found = false;
+      for (const c of clusters) {
+        const dist = Math.sqrt(Math.pow(c.lat - lat, 2) + Math.pow(c.lng - lng, 2));
+        if (dist < threshold) {
+          c.items.push(item);
+          c.lat = (c.lat * (c.items.length - 1) + lat) / c.items.length;
+          c.lng = (c.lng * (c.items.length - 1) + lng) / c.items.length;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        clusters.push({ lat, lng, items: [item] });
+      }
+    });
+
+    return clusters;
+  }, [stopsToRender, stopCoordinates, routeSequence]);
+
+  // Non-clustered stops (depot, vehicle, pickup, delayed)
+  const nonClusteredStops = useMemo(() => {
+    return stopsToRender.filter(s => {
+      const idx = s.originalIndex;
+      const isDepot = idx === 0;
+      const isLast = idx === routeSequence.length - 1;
+      const isPickup = idx === 2;
+      const isDelayed = idx === routeSequence.length - 2 && routeSequence.length > 3;
+      return isDepot || isLast || isPickup || isDelayed;
+    });
+  }, [stopsToRender, routeSequence]);
+
+  const visibleCoordsForFit = useMemo(() => {
+    return stopsToRender.map(s => stopCoordinates[s.id]).filter(Boolean);
+  }, [stopsToRender, stopCoordinates]);
+
+  const depotPos = routeSequence[0] ? stopCoordinates[routeSequence[0]] : null;
+
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-inner">
       
@@ -164,13 +301,13 @@ const MapViewer = ({ routeSequence = EMPTY_ARRAY, beforeSequence = EMPTY_ARRAY, 
           
           <div className="w-full h-px bg-slate-200 my-2"></div>
           
-          <div className="flex items-center"><div className="w-4 h-1 border-t-2 border-dashed border-purple-400 mr-3 flex-shrink-0"></div> <span className="text-slate-600 text-xs font-medium">Replanned Segment</span></div>
-          <div className="flex items-center"><div className="w-4 h-1 bg-purple-600 mr-3 flex-shrink-0"></div> <span className="text-slate-600 text-xs font-medium">Original Route</span></div>
+          <div className="flex items-center"><div className="w-4 h-1 bg-green-500 mr-3 flex-shrink-0"></div> <span className="text-slate-600 text-xs font-medium">Replanned Route</span></div>
+          <div className="flex items-center"><div className="w-4 h-1 bg-red-500 mr-3 flex-shrink-0"></div> <span className="text-slate-600 text-xs font-medium">Normal Route</span></div>
         </div>
       </div>
 
       <MapContainer 
-        center={rawPositions[0] || [12.9716, 77.5946]} 
+        center={fullRawPositions[0] || [12.9716, 77.5946]} 
         zoom={12} 
         zoomControl={false} 
         scrollWheelZoom 
@@ -188,38 +325,43 @@ const MapViewer = ({ routeSequence = EMPTY_ARRAY, beforeSequence = EMPTY_ARRAY, 
           />
         )}
         
-        {displayPositions.length > 1 && <MapUpdater positions={[...displayPositions, ...displayBeforePositions]} />}
+        <MapUpdater 
+          positions={visibleCoordsForFit} 
+          fitTrigger={fitTrigger} 
+          visibleCount={visibleCount} 
+          depotPosition={depotPos} 
+        />
         
-        {/* Replanned route (dashed) */}
+        {/* Normal Route (original/before replanning) - Render first (below) */}
         {displayBeforePositions.length > 1 && (
           <Polyline 
             positions={displayBeforePositions} 
-            color="#a855f7" 
-            weight={3} 
-            dashArray="6, 8" 
-            opacity={0.8}
-          />
-        )}
-        
-        {/* Original Route (solid) */}
-        {displayPositions.length > 1 && (
-          <Polyline 
-            positions={displayPositions} 
-            color="#7e22ce" 
+            color="#ef4444" 
             weight={4} 
             opacity={0.9} 
           />
         )}
         
-        {/* Markers Generation */}
-        {routeSequence.map((stopId, index) => {
-          if (!stopCoordinates[stopId]) return null;
+        {/* Replanned / Final Route - Render second (above) */}
+        {displayPositions.length > 1 && (
+          <Polyline 
+            positions={displayPositions} 
+            color={displayBeforePositions.length > 1 ? "#22c55e" : "#ef4444"} 
+            weight={4} 
+            opacity={0.9} 
+          />
+        )}
+        
+        {/* Non-clustered Markers */}
+        {nonClusteredStops.map(s => {
+          const stopId = s.id;
+          const index = s.originalIndex;
           const pos = stopCoordinates[stopId];
           const isDepot = index === 0;
           const isLast = index === routeSequence.length - 1;
-          const isPickup = index === 2; // Mocking a pickup for visual effect
-          const isDelayed = index === routeSequence.length - 2 && routeSequence.length > 3; // Mocking delayed
-          
+          const isPickup = index === 2;
+          const isDelayed = index === routeSequence.length - 2 && routeSequence.length > 3;
+
           let icon = getDeliveryIcon(index);
           if (isDepot) icon = getDepotIcon();
           else if (isLast) icon = getVehicleIcon();
@@ -227,37 +369,72 @@ const MapViewer = ({ routeSequence = EMPTY_ARRAY, beforeSequence = EMPTY_ARRAY, 
           else if (isDelayed) icon = getDelayedIcon(index);
 
           return (
-            <Marker key={`${stopId}-${index}`} position={pos} icon={icon}>
+            <Marker key={`noncluster-${stopId}-${index}`} position={pos} icon={icon}>
               <Popup className="custom-popup" closeButton={false}>
                 {isDepot && (
                   <div className="font-semibold text-slate-800 text-sm flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-green-500"></span> Depot DLA7
+                    <span className="w-2 h-2 rounded-full bg-green-500"></span> Depot: {stopId}
                   </div>
                 )}
                 {isPickup && (
                   <div className="text-sm font-medium">
                     <div className="text-orange-600 font-bold mb-1">New Pickup</div>
-                    <div className="text-slate-600">10:45 AM</div>
+                    <div className="text-slate-600">Stop {index}: {stopId}</div>
                   </div>
                 )}
                 {isDelayed && (
                   <div className="text-sm font-medium">
                     <div className="text-red-600 font-bold mb-1">Delayed Stop</div>
-                    <div className="text-slate-600">Est. 45m late</div>
+                    <div className="text-slate-600">Stop {index}: {stopId}</div>
                   </div>
                 )}
                 {isLast && (
                   <div className="text-sm font-medium">
-                    <div className="text-purple-700 font-bold mb-1">Vehicle KA-01-AB-1234</div>
-                    <div className="text-slate-600">Speed: 32 km/h</div>
+                    <div className="text-purple-700 font-bold mb-1">Vehicle Position</div>
+                    <div className="text-slate-600">Stop {index}: {stopId}</div>
                   </div>
-                )}
-                {!isDepot && !isPickup && !isDelayed && !isLast && (
-                  <div className="font-semibold text-slate-700 text-sm">Stop {index}: {stopId}</div>
                 )}
               </Popup>
             </Marker>
           );
+        })}
+
+        {/* Clustered Delivery Stop Markers */}
+        {clusteredDeliveryStops.map((cluster, cIdx) => {
+          const isSingle = cluster.items.length === 1;
+          if (isSingle) {
+            const item = cluster.items[0];
+            const stopId = item.id;
+            const index = item.originalIndex;
+            const pos = stopCoordinates[stopId];
+            const icon = getDeliveryIcon(index);
+
+            return (
+              <Marker key={`single-delivery-${stopId}-${index}`} position={pos} icon={icon}>
+                <Popup className="custom-popup" closeButton={false}>
+                  <div className="font-semibold text-slate-700 text-sm">Stop {index}: {stopId}</div>
+                </Popup>
+              </Marker>
+            );
+          } else {
+            const count = cluster.items.length;
+            const icon = getClusterIcon(count);
+            return (
+              <Marker key={`cluster-${cIdx}-${count}`} position={[cluster.lat, cluster.lng]} icon={icon}>
+                <Popup className="custom-popup" closeButton={false}>
+                  <div className="font-bold text-indigo-800 text-sm mb-2">Cluster of {count} Stops</div>
+                  <div className="max-h-32 overflow-y-auto space-y-1 text-xs text-slate-600 pr-1">
+                    {cluster.items.map(item => (
+                      <div key={item.id} className="flex justify-between border-b border-slate-100 pb-0.5">
+                        <span className="font-medium text-slate-800">Stop {item.originalIndex}:</span>
+                        <span>{item.id.substring(0, 10)}...</span>
+                      </div>
+                    ))}
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          }
         })}
       </MapContainer>
     </div>

@@ -23,3 +23,12 @@ MAX_PICKUP_DISTANCE_IMPACT_KM = float(os.environ.get("ROUTEMIND_MAX_PICKUP_DISTA
 MAX_PICKUP_TIME_IMPACT_MINS = float(os.environ.get("ROUTEMIND_MAX_PICKUP_TIME_MINS", "15"))
 MAX_ROUTES_LOAD = int(os.environ.get("ROUTEMIND_MAX_ROUTES", "100"))
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# Demo mode: number of stops shown in the interactive live demo view
+DEMO_STOP_COUNT = int(os.environ.get("ROUTEMIND_DEMO_STOPS", "25"))
+
+# OR-Tools solver wall-clock time limit (seconds). Configurable for benchmarks.
+ORTOOLS_TIME_LIMIT_SEC = int(os.environ.get("ROUTEMIND_ORTOOLS_TIME_LIMIT", "5"))
+
+# Benchmark mode: target stop count for full-scale benchmarks
+BENCHMARK_STOP_COUNT = int(os.environ.get("ROUTEMIND_BENCHMARK_STOPS", "150"))

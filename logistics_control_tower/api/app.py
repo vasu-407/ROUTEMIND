@@ -9,7 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
-from core.config import DATA_DIR, MAX_PICKUP_DISTANCE_IMPACT_KM, MAX_PICKUP_TIME_IMPACT_MINS
+from core.config import (
+    DATA_DIR, MAX_PICKUP_DISTANCE_IMPACT_KM, MAX_PICKUP_TIME_IMPACT_MINS,
+    DEMO_STOP_COUNT,
+)
+from core.models import Route
+from core.geo import haversine_km
+from engines.prediction_cache import prediction_cache
+from engines.benchmark import BenchmarkEngine
+from engines.ablation import AblationEngine
 from engines.data_loader import DataLoader
 from constraints.capacity import CapacityConstraint
 from constraints.cod_limit import CODLimitConstraint
@@ -76,6 +84,48 @@ auto_detected_events: List[dict] = []
 COMPUTE_COST_INR_PER_CPU_SECOND = 0.02
 
 
+# ── Seed analytics on startup ────────────────────────────────────────────────
+# Pre-populate analytics_runs with baseline data from the loaded routes so the
+# Analytics page always shows charts even before the user runs any optimisation.
+def _seed_analytics():
+    seeded = 0
+    for route_id, route in list(routes_db.items())[:7]:
+        try:
+            greedy_result = greedy.solve(route)
+            opt_result    = optimizer.solve(route)
+            g_dist  = greedy_result.get("total_distance_km", 0)
+            o_dist  = opt_result.get("total_distance_km", 0)
+            g_time  = greedy_result.get("total_travel_time_sec", 0)
+            o_time  = opt_result.get("total_travel_time_sec", 0)
+            dist_saved = round(max(g_dist - o_dist, 0), 2)
+            time_saved = round(max((g_time - o_time) / 60, 0), 1)
+            fuel_l   = round(dist_saved * 0.12, 2)   # ~0.12 L/km saved
+            fuel_inr = round(fuel_l * 95, 2)          # ₹95/L
+            exec_ms  = opt_result.get("execution_time_ms", 0)
+            analytics_runs.append({
+                "route_id": route_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "metrics": {
+                    "distance_saved_km": dist_saved,
+                    "time_saved_mins": time_saved,
+                    "fuel_saved_l": fuel_l,
+                    "fuel_saved_inr": fuel_inr,
+                },
+                "greedy": greedy_result,
+                "ortools": opt_result,
+                "cost_per_route_inr": round(exec_ms / 1000 * COMPUTE_COST_INR_PER_CPU_SECOND, 4),
+                "_seeded": True,
+            })
+            seeded += 1
+        except Exception as _seed_err:
+            print(f"[seed] skipping {route_id}: {_seed_err}")
+    print(f"[analytics] seeded {seeded} baseline run(s) from loaded routes.")
+
+
+if routes_db:
+    _seed_analytics()
+
+
 def route_label(route_id: str) -> str:
     r = routes_db.get(route_id)
     if not r:
@@ -127,6 +177,8 @@ class CopilotQuery(BaseModel):
     route_id: Optional[str] = None
 
 
+
+
 class ApprovalAction(BaseModel):
     route_id: str
     action: str
@@ -140,6 +192,7 @@ def health():
         "data_dir": DATA_DIR,
         "data_dir_exists": os.path.isdir(DATA_DIR),
         "routes_loaded": len(routes_db),
+        "prediction_cache": prediction_cache.get_stats(),
     }
 
 
@@ -262,7 +315,7 @@ def _route_summary_dict(route_id: str) -> dict:
 
 
 @app.post("/optimize")
-def optimize_route(route_id: str):
+def optimize_route(route_id: str, demo: bool = False, demo_n: int = DEMO_STOP_COUNT):
     if route_id not in routes_db:
         raise HTTPException(status_code=404, detail="Route not found")
 
@@ -274,7 +327,11 @@ def optimize_route(route_id: str):
     except Exception as e:
         return {"error": str(e), "approvalRequired": True}
 
-    opt_result = optimizer.optimize(valid_route)
+    opt_result = optimizer.optimize(
+        valid_route,
+        cache=prediction_cache,
+        demo_n=demo_n if demo else None,
+    )
     greedy_result = greedy.optimize(valid_route)
     metrics = evaluator.evaluate(greedy_result, opt_result, valid_route)
     candidate_evaluation = evaluate_candidate(greedy_result, opt_result)
@@ -325,13 +382,59 @@ def optimize_route(route_id: str):
     }
 
 
+def get_demo_route_slice(route: Route, n: int = DEMO_STOP_COUNT) -> Route:
+    """Returns a deep-copy of the route containing only the depot + (n-1) nearest stops."""
+    import copy
+    from core.geo import haversine_km
+
+    sliced = copy.deepcopy(route)
+    full_stops = list(sliced.stops.keys())
+    depot_id = sliced.get_depot_id()
+
+    if depot_id and depot_id in full_stops and len(full_stops) > n:
+        depot = sliced.stops[depot_id]
+        non_depot = [sid for sid in full_stops if sid != depot_id]
+        non_depot.sort(
+            key=lambda sid: haversine_km(
+                depot.lat, depot.lng,
+                sliced.stops[sid].lat, sliced.stops[sid].lng,
+            )
+        )
+        demo_stops = [depot_id] + non_depot[: n - 1]
+    else:
+        demo_stops = full_stops[:n]
+
+    demo_set = set(demo_stops)
+    sliced.stops = {sid: sliced.stops[sid] for sid in demo_stops}
+
+    # Filter distance matrix
+    new_matrix = {}
+    for origin in demo_stops:
+        if origin in route.distance_matrix:
+            new_matrix[origin] = {
+                dest: val for dest, val in route.distance_matrix[origin].items()
+                if dest in demo_set
+            }
+    sliced.distance_matrix = new_matrix
+    return sliced
+
+
 @app.post("/replan")
 def replan(payload: EventPayload):
     if payload.route_id not in routes_db:
         raise HTTPException(status_code=404, detail="Route not found")
 
     route = routes_db[payload.route_id]
-    event_result = event_engine.handle_event(payload.event_type, payload.data, route)
+    
+    # Check if this replan should run on the demo slice (default to True for live UI)
+    is_demo = payload.data.get("demo", True)
+    demo_n = payload.data.get("demo_n", DEMO_STOP_COUNT)
+    if is_demo:
+        route = get_demo_route_slice(route, demo_n)
+
+    event_result = event_engine.handle_event(
+        payload.event_type, payload.data, route, cache=prediction_cache
+    )
     candidate_route = event_result.pop("candidate_route")
     candidate_constraints = constraint_statuses(candidate_route, constraints)
     feasibility_check = {
@@ -409,7 +512,7 @@ def replan(payload: EventPayload):
         "explanation": explanation,
         "metrics": metrics,
         "feasibility_check": feasibility_check,
-        "stop_coordinates": stop_coordinates(route),
+        "stop_coordinates": stop_coordinates(candidate_route),
         "before_sequence": event_result.get("before_sequence"),
         "after_sequence": event_result.get("after_sequence"),
         "status": "pending" if should_queue_candidate else "rejected",
@@ -420,7 +523,7 @@ def replan(payload: EventPayload):
         "label": route_label(payload.route_id),
         "event_impact": event_result,
         "ai_explanation": explanation,
-        "stop_coordinates": stop_coordinates(route),
+        "stop_coordinates": stop_coordinates(candidate_route),
         "before_sequence": event_result.get("before_sequence"),
         "after_sequence": event_result.get("after_sequence"),
         "approval_status": "pending" if should_queue_candidate else "rejected",
@@ -435,13 +538,16 @@ def simulate(payload: EventPayload):
 
 
 @app.get("/comparison")
-def compare_solvers(route_id: str):
+def compare_solvers(route_id: str, demo: bool = True, demo_n: int = DEMO_STOP_COUNT):
     if route_id not in routes_db:
         raise HTTPException(status_code=404, detail="Route not found")
 
     route = routes_db[route_id]
+    if demo:
+        route = get_demo_route_slice(route, demo_n)
+
     greedy_res = greedy.optimize(route)
-    or_tools_res = optimizer.optimize(route)
+    or_tools_res = optimizer.optimize(route, cache=prediction_cache)
     metrics = evaluator.evaluate(greedy_res, or_tools_res, route)
     candidate_evaluation = evaluate_candidate(greedy_res, or_tools_res)
 
@@ -459,6 +565,99 @@ def compare_solvers(route_id: str):
             "stops": len(route.stops),
         },
     }
+
+
+# ── Demo Subset Endpoint ────────────────────────────────────────────────────────
+
+@app.get("/routes/{route_id}/demo")
+def route_demo(route_id: str, n: int = DEMO_STOP_COUNT):
+    """
+    Returns a geographically coherent subset of ~20-30 stops from the full
+    Amazon route for map visualization and interactive live demo.
+
+    The original dataset route is NOT modified — this is a read-only view.
+    full_stop_count reflects the actual Amazon route size.
+    """
+    if route_id not in routes_db:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    n = max(5, min(n, 80))
+    route = routes_db[route_id]
+    full_stops = list(route.stops.keys())
+    depot_id = route.get_depot_id()
+
+    if depot_id and depot_id in full_stops and len(full_stops) > n:
+        depot = route.stops[depot_id]
+        non_depot = [sid for sid in full_stops if sid != depot_id]
+        non_depot.sort(
+            key=lambda sid: haversine_km(
+                depot.lat, depot.lng,
+                route.stops[sid].lat, route.stops[sid].lng,
+            )
+        )
+        demo_stops = [depot_id] + non_depot[: n - 1]
+    else:
+        demo_stops = full_stops[:n]
+
+    demo_set = set(demo_stops)
+    coords = {sid: [route.stops[sid].lat, route.stops[sid].lng] for sid in demo_stops}
+    seq = (
+        [depot_id] + [s for s in demo_stops if s != depot_id] + [depot_id]
+        if depot_id and depot_id in demo_set
+        else demo_stops
+    )
+
+    return {
+        "route_id": route_id,
+        "demo_mode": True,
+        "demo_stop_count": len(demo_stops),
+        "full_stop_count": len(full_stops),
+        "sequence": seq,
+        "stop_coordinates": coords,
+        "note": (
+            f"Interactive demo view: {len(demo_stops)} of {len(full_stops)} stops "
+            f"from the original Amazon route. Full route data is preserved."
+        ),
+    }
+
+
+# ── Benchmark Endpoint ─────────────────────────────────────────────────────────
+
+class BenchmarkRequest(BaseModel):
+    route_id: str
+
+
+@app.post("/benchmark")
+def run_benchmark(body: BenchmarkRequest):
+    """
+    Full performance benchmark: Greedy, XGBoost (cold + warm cache),
+    OR-Tools, replan latency, peak memory. All numbers are real measured values.
+    """
+    if body.route_id not in routes_db:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    route = routes_db[body.route_id]
+    bench = BenchmarkEngine(greedy, optimizer)
+    return bench.full_benchmark(route, cache=prediction_cache)
+
+
+# ── ML Ablation Endpoint ───────────────────────────────────────────────────────
+
+@app.get("/ablation")
+def run_ablation(route_id: str):
+    """
+    Compare Haversine baseline vs XGBoost ML arc costs.
+    Returns MAE, RMSE, R² per-leg and route-level distance/time deltas.
+
+    ROUTEMIND_USE_ML_TRAVEL_TIMES=true  → normal RouteMind configuration.
+    ROUTEMIND_USE_ML_TRAVEL_TIMES=false → haversine-only ablation/baseline mode.
+    """
+    if route_id not in routes_db:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    route = routes_db[route_id]
+    ablation_engine = AblationEngine(optimizer)
+    return ablation_engine.compare(route, constraints=constraints)
 
 
 @app.get("/analytics")
