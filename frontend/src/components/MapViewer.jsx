@@ -236,7 +236,7 @@ const MapViewer = ({
       return !isDepot && !isLast && !isPickup && !isDelayed;
     });
 
-    const threshold = 0.0035; // Grouping distance delta
+    const threshold = 0.0; // Grouping distance delta (Disabled as requested)
     const clusters = [];
 
     deliveryStops.forEach(item => {
@@ -405,25 +405,28 @@ const MapViewer = ({
                 {isDepot && !isFinalDestination && (
                   <div className="text-sm">
                     <div className="font-bold text-green-600 mb-1">DEPOT / START</div>
-                    <div className="text-slate-700">ID: <span className="font-medium text-slate-500">{stopId}</span></div>
-                    <div className="text-slate-500 text-xs mt-1">{pos[0].toFixed(5)}, {pos[1].toFixed(5)}</div>
+                    <div className="text-slate-700">Sequence: <span className="font-medium">{index}</span></div>
+                    <div className="text-slate-700">Stop ID: <span className="font-medium text-slate-500">{stopId}</span></div>
+                    <div className="text-slate-700">Type: <span className="font-medium text-slate-500">Station</span></div>
+                    <div className="text-slate-500 text-xs mt-1">Lat: {pos[0].toFixed(5)}, Lng: {pos[1].toFixed(5)}</div>
                   </div>
                 )}
                 {isFinalDestination && (
                   <div className="text-sm">
                     <div className="font-bold text-blue-600 mb-1">{isReturnToDepot ? "DESTINATION / RETURN TO DEPOT" : "FINAL DESTINATION"}</div>
                     <div className="text-slate-700">Sequence: <span className="font-medium">{index}</span></div>
-                    <div className="text-slate-700">ID: <span className="font-medium text-slate-500">{stopId}</span></div>
-                    <div className="text-slate-500 text-xs mt-1">{pos[0].toFixed(5)}, {pos[1].toFixed(5)}</div>
+                    <div className="text-slate-700">Stop ID: <span className="font-medium text-slate-500">{stopId}</span></div>
+                    <div className="text-slate-700">Type: <span className="font-medium text-slate-500">{isReturnToDepot ? "Station" : "Dropoff"}</span></div>
+                    <div className="text-slate-500 text-xs mt-1">Lat: {pos[0].toFixed(5)}, Lng: {pos[1].toFixed(5)}</div>
                   </div>
                 )}
                 {isPickup && (
                   <div className="text-sm">
                     <div className="text-orange-600 font-bold mb-1">NEW PICKUP — PENDING</div>
                     <div className="text-slate-700">Sequence: <span className="font-medium">{index}</span></div>
-                    <div className="text-slate-700">ID: <span className="font-medium text-slate-500">{stopId}</span></div>
+                    <div className="text-slate-700">Stop ID: <span className="font-medium text-slate-500">{stopId}</span></div>
                     <div className="text-slate-700">Type: <span className="font-medium text-slate-500">Pickup</span></div>
-                    <div className="text-slate-500 text-xs mt-1">{pos[0].toFixed(5)}, {pos[1].toFixed(5)}</div>
+                    <div className="text-slate-500 text-xs mt-1">Lat: {pos[0].toFixed(5)}, Lng: {pos[1].toFixed(5)}</div>
                   </div>
                 )}
                 {isDelayed && (
@@ -455,8 +458,9 @@ const MapViewer = ({
                   <div className="text-sm">
                     <div className="font-bold text-slate-800 mb-1">Delivery Stop</div>
                     <div className="text-slate-700">Sequence: <span className="font-medium">{index}</span></div>
-                    <div className="text-slate-700">ID: <span className="font-medium text-slate-500">{stopId}</span></div>
-                    <div className="text-slate-500 text-xs mt-1">{pos[0].toFixed(5)}, {pos[1].toFixed(5)}</div>
+                    <div className="text-slate-700">Stop ID: <span className="font-medium text-slate-500">{stopId}</span></div>
+                    <div className="text-slate-700">Type: <span className="font-medium text-slate-500">Dropoff</span></div>
+                    <div className="text-slate-500 text-xs mt-1">Lat: {pos[0].toFixed(5)}, Lng: {pos[1].toFixed(5)}</div>
                   </div>
                 </Popup>
               </Marker>

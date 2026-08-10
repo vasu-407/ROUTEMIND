@@ -7,6 +7,7 @@ import MapViewer from '../components/MapViewer';
 const RoutePlanner = () => {
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [stopCount, setStopCount] = useState(25);
   const navigate = useNavigate();
 
   // Load initial state from sessionStorage
@@ -137,7 +138,7 @@ const RoutePlanner = () => {
     if (!selectedRoute) return;
     setLoading(true);
     try {
-      const res = await compareSolvers(selectedRoute);
+      const res = await compareSolvers(selectedRoute, stopCount);
       setComparison(res.data);
       if (res.data.ortools_solver) {
          const newMapSeq = res.data.ortools_solver.sequence || [];
@@ -158,6 +159,12 @@ const RoutePlanner = () => {
     } catch (e) { console.error(e); }
     setLoading(false);
   };
+
+  useEffect(() => {
+    if (selectedRoute && !loading) {
+      handleOptimize();
+    }
+  }, [stopCount]);
 
   const handleAnalyze = () => {
     if (selectedRoute) {
@@ -216,6 +223,19 @@ const RoutePlanner = () => {
                 {r.route_id.substring(0, 15)}...
               </option>
             ))}
+          </select>
+          <select
+            className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 shadow-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+            value={stopCount}
+            onChange={e => {
+              setStopCount(Number(e.target.value));
+            }}
+          >
+            <option value={10}>10 Stops</option>
+            <option value={15}>15 Stops</option>
+            <option value={20}>20 Stops</option>
+            <option value={25}>25 Stops</option>
+            <option value={30}>30 Stops</option>
           </select>
           <button
             onClick={handleOptimize}

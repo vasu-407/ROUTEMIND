@@ -24,7 +24,11 @@ module.exports = {
   getRouteMap: (routeId) => pythonClient.get(`/routes/${encodeURIComponent(routeId)}/map`),
   optimizeRoute: (routeId) => pythonClient.post(`/optimize?route_id=${routeId}`),
   replan: (payload) => pythonClient.post('/replan', payload),
-  getComparison: (routeId) => pythonClient.get(`/comparison?route_id=${routeId}`),
+  getComparison: (routeId, demoN) => {
+    let url = `/comparison?route_id=${routeId}`;
+    if (demoN) url += `&demo_n=${demoN}`;
+    return pythonClient.get(url);
+  },
   getSimulations: () => pythonClient.get('/simulations'),
   getAnalytics: () => pythonClient.get('/analytics'),
   getEvents: (routeId) => pythonClient.get(routeId ? `/events?route_id=${encodeURIComponent(routeId)}` : '/events'),

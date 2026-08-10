@@ -142,10 +142,10 @@ router.get('/simulations', async (req, res) => {
 
 // GET /api/comparison
 router.get('/comparison', async (req, res) => {
-  const { route_id } = req.query;
+  const { route_id, demo_n } = req.query;
   if (!route_id) return res.status(400).json({ error: 'route_id is required' });
   try {
-    const { data } = await proxy.getComparison(route_id);
+    const { data } = await proxy.getComparison(route_id, demo_n);
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: 'Comparison failed', detail: err.message });

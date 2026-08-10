@@ -10,7 +10,7 @@ export const getRoutes = () => api.get('/routes');
 export const getRouteMap = (routeId) => api.get(`/routes/${encodeURIComponent(routeId)}/map`);
 export const optimizeRoute = (routeId) => api.post('/optimize', { route_id: routeId });
 export const replanEvent = (payload) => api.post('/replan', payload);
-export const compareSolvers = (routeId) => api.get(`/comparison?route_id=${routeId}`);
+export const compareSolvers = (routeId, demoN) => api.get('/comparison', { params: { route_id: routeId, demo_n: demoN } });
 export const getAnalytics = () => api.get('/analytics');
 export const getSimulations = () => api.get('/events');
 export const getMlMetrics = () => api.get('/ml/metrics');
