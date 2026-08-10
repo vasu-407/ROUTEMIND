@@ -1,4 +1,4 @@
-/**
+/**
  * Dashboard Routes
  */
 const express = require('express');
@@ -11,14 +11,11 @@ const OptimizationLog = require('../models/OptimizationLog');
 router.get('/dashboard', async (req, res) => {
   try {
     const { data } = await proxy.getDashboard();
-
-    // Augment with ML health
     let mlStatus = { model_ready: false };
     try {
       const mlHealth = await proxy.getMlHealth();
       mlStatus = mlHealth.data;
     } catch (_) {}
-
     res.json({ ...data, ml_status: mlStatus });
   } catch (err) {
     res.status(502).json({ error: 'Optimization service unavailable', detail: err.message });
@@ -50,11 +47,8 @@ router.get('/routes/:routeId/map', async (req, res) => {
 router.post('/optimize', async (req, res) => {
   const { route_id } = req.body;
   if (!route_id) return res.status(400).json({ error: 'route_id is required' });
-
   try {
     const { data } = await proxy.optimizeRoute(route_id);
-
-    // Persist log to MongoDB (best-effort)
     try {
       await OptimizationLog.create({
         routeId: route_id,
@@ -69,7 +63,6 @@ router.post('/optimize', async (req, res) => {
         explanation: data.ai_explanation,
       });
     } catch (_) {}
-
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: 'Optimization failed', detail: err.message });
@@ -80,7 +73,6 @@ router.post('/optimize', async (req, res) => {
 router.post('/replan', async (req, res) => {
   try {
     const { data } = await proxy.replan(req.body);
-
     try {
       await OptimizationLog.create({
         routeId: req.body.route_id,
@@ -90,7 +82,6 @@ router.post('/replan', async (req, res) => {
         explanation: data.ai_explanation,
       });
     } catch (_) {}
-
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: 'Replan failed', detail: err.message });
@@ -104,6 +95,38 @@ router.post('/simulate-event', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: 'Event simulation failed', detail: err.message });
+  }
+});
+
+
+// GET /api/events
+router.get('/events', async (req, res) => {
+  try {
+    const route_id = req.query.route_id || '';
+    const { data } = await proxy.getEvents(route_id);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Events fetch failed', detail: err.message });
+  }
+});
+
+// POST /api/events/:eventId/approve
+router.post('/events/:eventId/approve', async (req, res) => {
+  try {
+    const { data } = await proxy.approveEvent(req.params.eventId, req.body);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Approve failed', detail: err.message });
+  }
+});
+
+// POST /api/events/:eventId/reject
+router.post('/events/:eventId/reject', async (req, res) => {
+  try {
+    const { data } = await proxy.rejectEvent(req.params.eventId, req.body);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Reject failed', detail: err.message });
   }
 });
 
@@ -176,6 +199,16 @@ router.post('/supervisor/approve', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: 'Approval action failed', detail: err.message });
+  }
+});
+
+// GET /api/supervisor/decision/:routeId
+router.get('/supervisor/decision/:routeId', async (req, res) => {
+  try {
+    const { data } = await proxy.getDecision(req.params.routeId);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to fetch decision', detail: err.message });
   }
 });
 

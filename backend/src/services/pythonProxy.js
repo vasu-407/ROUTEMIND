@@ -27,8 +27,12 @@ module.exports = {
   getComparison: (routeId) => pythonClient.get(`/comparison?route_id=${routeId}`),
   getSimulations: () => pythonClient.get('/simulations'),
   getAnalytics: () => pythonClient.get('/analytics'),
+  getEvents: (routeId) => pythonClient.get(routeId ? `/events?route_id=${encodeURIComponent(routeId)}` : '/events'),
+  approveEvent: (eventId, payload) => pythonClient.post(`/events/${encodeURIComponent(eventId)}/approve`, payload),
+  rejectEvent: (eventId, payload) => pythonClient.post(`/events/${encodeURIComponent(eventId)}/reject`, payload),
   getPendingApprovals: () => pythonClient.get('/supervisor/pending'),
   approveRoute: (payload) => pythonClient.post('/supervisor/approve', payload),
+  getDecision: (routeId) => pythonClient.get(`/supervisor/decision/${encodeURIComponent(routeId)}`),
   askCopilot: (payload) => pythonClient.post('/copilot', payload),
   
   // ── Monitor Service ──────────────────────────────────────────
