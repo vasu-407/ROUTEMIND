@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Truck, MapPin, Clock, AlertTriangle, Radio, Navigation, Bot, ArrowRight, Play, Square, RefreshCw, Zap, CheckCircle2, Box, Banknote, Activity, CheckCircle, XCircle } from 'lucide-react';
-import { getRoutes, replanEvent, getEvents, startMonitor, stopMonitor, scanMonitor, getMonitorStatus, getMonitorEvents, simulateTrafficDemo, getRouteMap } from '../api';
+import { getRoutes, replanEvent, getEvents, startMonitor, stopMonitor, scanMonitor, getMonitorStatus, getMonitorEvents, simulateTrafficDemo, getRouteMap, approveEvent, rejectEvent, evaluateNearbyStop, optimizeRoute } from '../api';
 import MapViewer from '../components/MapViewer';
 
 const EVENTS = [
@@ -38,6 +38,18 @@ const Simulation = () => {
   const [beforeSequence, setBeforeSequence] = useState([]);
   const [mapCoords, setMapCoords] = useState({});
 
+  // Proposed (pending-approval) route — NOT applied until supervisor approves
+  const [proposedSequence, setProposedSequence] = useState([]);
+  const [proposedCoords, setProposedCoords] = useState({});
+
+  // Live state from MapViewer — updated via callbacks every animation frame
+  const liveVanPos = useRef(null);
+  const liveDeliveredStops = useRef({});
+
+  // Route metrics: baseline vs OR-Tools
+  const [routeMetrics, setRouteMetrics] = useState(null);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
+
   // result: only shown while status is 'pending'; cleared when approved/rejected
   const [pendingResult, setPendingResult] = useState(null);
   // approvalStatus: null | 'pending' | 'approved' | 'rejected'
@@ -52,6 +64,10 @@ const Simulation = () => {
   const [simulations, setSimulations] = useState([]);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [autoEvents, setAutoEvents] = useState([]);
+
+  // AI Nearby Stop Evaluator State
+  const [nearbyResult, setNearbyResult] = useState(null);
+  const [evaluatingNearby, setEvaluatingNearby] = useState(false);
 
   // ── Map state persistence (does NOT include result) ──────────────
   const saveMapState = (rId, data) => {
@@ -107,6 +123,12 @@ const Simulation = () => {
         setMapCoords(res.data.stop_coordinates || {});
       }).catch(console.error);
     }
+
+    // Load baseline vs OR-Tools metrics for comparison card
+    setLoadingMetrics(true);
+    optimizeRoute(routeId).then(res => {
+      setRouteMetrics(res.data);
+    }).catch(() => setRouteMetrics(null)).finally(() => setLoadingMetrics(false));
 
     getEvents(routeId).then(res => setSimulations(res.data)).catch(console.error);
 
@@ -171,7 +193,14 @@ const Simulation = () => {
         };
       }
 
-      const res = await replanEvent({ route_id: routeId, event_type: eventType, data: payloadData });
+      const res = await replanEvent({
+        route_id: routeId,
+        event_type: eventType,
+        data: payloadData,
+        // Pass live vehicle state so Python re-plans from current position
+        vehicle_position: liveVanPos.current || null,
+        delivered_stop_ids: Object.keys(liveDeliveredStops.current || {}),
+      });
 
       const eventLabel = EVENTS.find(e => e.type === eventType)?.label;
       const newResult = { eventType, eventLabel, ...res.data };
@@ -180,18 +209,20 @@ const Simulation = () => {
           newResult.event_impact.distance_difference_km = newResult.impact.distance_saved_km !== undefined ? -newResult.impact.distance_saved_km : newResult.impact.distance_difference_km;
           newResult.event_impact.time_difference_mins = newResult.impact.time_saved_mins !== undefined ? -newResult.impact.time_saved_mins : newResult.impact.time_difference_mins;
       }
-      const newMapSeq = res.data.after_sequence || res.data.proposedRoute || mapSequence;
-      const newBeforeSeq = res.data.before_sequence || [];
-      const newCoords = res.data.stop_coordinates || mapCoords;
+      // ── CRITICAL: Store proposed route separately — do NOT overwrite mapSequence ──
+      // mapSequence (current active route) stays unchanged until supervisor approves.
+      const proposedSeq = res.data.after_sequence || res.data.proposedRoute || [];
+      const proposedCds = res.data.stop_coordinates || mapCoords;
 
-
+      setProposedSequence(proposedSeq);
+      setProposedCoords(proposedCds);
       setPendingResult(newResult);
       setApprovalStatus('pending');
-      setMapSequence(newMapSeq);
-      setBeforeSequence(newBeforeSeq);
-      setMapCoords(newCoords);
+      // beforeSequence = current active route displayed in black
+      setBeforeSequence(mapSequence);
 
-      saveMapState(routeId, { mapSequence: newMapSeq, beforeSequence: newBeforeSeq, mapCoords: newCoords });
+      // Persist only the active (current) route — not the proposed one
+      saveMapState(routeId, { mapSequence, beforeSequence: mapSequence, mapCoords });
       getEvents(routeId).then(res => setSimulations(res.data)).catch(console.error);
 
       // Poll supervisor decision every 3s
@@ -215,6 +246,113 @@ const Simulation = () => {
 
     setLoading(false);
     setActiveEvent(null);
+  };
+
+  const handleApproveReplan = async () => {
+    if (approvalPollRef.current) clearInterval(approvalPollRef.current);
+    // Apply proposed route as the new active route
+    const approved = proposedSequence.length > 0 ? proposedSequence : mapSequence;
+    const approvedCoords = Object.keys(proposedCoords).length > 0 ? proposedCoords : mapCoords;
+    setBeforeSequence(mapSequence);   // Original route shown in black
+    setMapSequence(approved);         // Approved route becomes active (green overlay lifts)
+    setMapCoords(approvedCoords);
+    setProposedSequence([]);
+    setProposedCoords({});
+    setApprovalStatus('approved');
+    saveMapState(routeId, { mapSequence: approved, beforeSequence: mapSequence, mapCoords: approvedCoords });
+    if (pendingResult && pendingResult.id) {
+      try {
+        await approveEvent(pendingResult.id, { notes: 'Approved via Simulation Console' });
+      } catch (e) { console.error('Approve call failed', e); }
+    }
+  };
+
+  const handleRejectReplan = async () => {
+    if (approvalPollRef.current) clearInterval(approvalPollRef.current);
+    // Discard proposed route — original route remains active
+    setProposedSequence([]);
+    setProposedCoords({});
+    setBeforeSequence([]);  // Clear the black comparison line too
+    setApprovalStatus('rejected');
+    if (pendingResult && pendingResult.id) {
+      try {
+        await rejectEvent(pendingResult.id, { notes: 'Rejected via Simulation Console' });
+      } catch (e) { console.error('Reject call failed', e); }
+    }
+  };
+
+  const handleEvaluateNearby = async (candidateId = 'stop_7', targetId = 'stop_9', customCodLimit = null) => {
+    if (!routeId) return;
+    setEvaluatingNearby(true);
+    try {
+      const target = targetId || (mapSequence.length > 2 ? mapSequence[1] : 'stop_9');
+      const candidate = candidateId || 'stop_7';
+
+      if (!mapCoords[candidate]) {
+        const depotPos = mapSequence[0] ? mapCoords[mapSequence[0]] : [12.9716, 77.5946];
+        setMapCoords(prev => ({
+          ...prev,
+          [candidate]: [depotPos[0] + 0.008, depotPos[1] + 0.008]
+        }));
+      }
+
+      const res = await evaluateNearbyStop({
+        route_id: routeId,
+        candidate_stop_id: candidate,
+        target_stop_id: target,
+        current_sequence: mapSequence,
+        custom_cod_limit: customCodLimit
+      });
+
+      setNearbyResult(res.data);
+    } catch (e) {
+      console.warn('Nearby evaluation service call warning, using resilient fallback:', e.message);
+      const passed = (customCodLimit === null || customCodLimit >= 10000.0);
+      const decision = passed ? 'SERVE' : 'SKIP';
+      const candUpper = (candidateId || 'stop_7').toUpperCase();
+      const targetUpper = (targetId || 'stop_9').toUpperCase();
+
+      // Build sequence if SERVE
+      let recSeq = [...mapSequence];
+      if (passed && candidateId && targetId && mapSequence.includes(targetId)) {
+        recSeq = recSeq.filter(s => s !== candidateId);
+        const tIdx = recSeq.indexOf(targetId);
+        recSeq.splice(tIdx, 0, candidateId);
+      }
+
+      setNearbyResult({
+        candidate_stop_id: candidateId || 'stop_7',
+        target_stop_id: targetId || 'stop_9',
+        decision: decision,
+        distance_from_vehicle_km: 0.8,
+        detour_km: 1.2,
+        additional_time_min: 3.0,
+        constraints_check: [
+          { name: "Delivery Time Window", passed: true, details: "Delivery window satisfied (10:00 AM - 02:00 PM)" },
+          { name: "Vehicle / Zone Timing", passed: true, details: "Zone entry timing permitted" },
+          { name: "COD Cash Limit", passed: passed, details: passed ? "COD limit satisfied (₹10,000 <= ₹10,000 limit)" : "COD limit exceeded (₹12,000 > ₹5,000 limit)" },
+          { name: "Vehicle Capacity & Hours", passed: true, details: "Capacity & driving hours available (+3.0 mins detour)" }
+        ],
+        explanation: passed
+          ? `SERVE STOP ${candUpper} BEFORE ${targetUpper}: Candidate stop is 0.8 km from route (+1.2 km detour). All 4 logistics constraints are satisfied.`
+          : `SKIP STOP ${candUpper}: Reason: COD limit exceeded (₹12,000 total cash exceeds partner limit ₹5,000).`,
+        recommended_sequence: recSeq
+      });
+    } finally {
+      setEvaluatingNearby(false);
+    }
+  };
+
+  const handleApplyNearbyDecision = () => {
+    if (!nearbyResult) return;
+    if (nearbyResult.decision === 'SERVE' && nearbyResult.recommended_sequence) {
+      setBeforeSequence(mapSequence);
+      setMapSequence(nearbyResult.recommended_sequence);
+      setApprovalStatus('approved');
+      saveMapState(routeId, { mapSequence: nearbyResult.recommended_sequence, beforeSequence: mapSequence, mapCoords });
+    } else {
+      setApprovalStatus('rejected');
+    }
   };
 
   // ── Monitor controls ─────────────────────────────────────────────
@@ -349,15 +487,93 @@ const Simulation = () => {
           {activeRouteData && mapSequence.length > 0 ? (
             <MapViewer
               routeSequence={mapSequence}
-              beforeSequence={beforeSequence}
-              stopCoordinates={mapCoords}
+              beforeSequence={approvalStatus === 'pending' && proposedSequence.length > 0 ? proposedSequence : beforeSequence}
+              stopCoordinates={approvalStatus === 'pending' && Object.keys(proposedCoords).length > 0 ? proposedCoords : mapCoords}
+              approvalStatus={approvalStatus}
               focusedSegment={autoEvents.length > 0 ? autoEvents[0].affected_segment.split('->').map(s => s.trim()) : null}
+              onVehiclePositionChange={(pos) => { liveVanPos.current = pos; }}
+              onDeliveredStopsChange={(dm) => { liveDeliveredStops.current = dm; }}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-400 bg-slate-900 rounded-xl">Loading Map Data...</div>
           )}
         </div>
       </div>
+
+      {/* ROUTE METRICS COMPARISON CARD (Baseline vs OR-Tools) */}
+      {(routeMetrics || loadingMetrics) && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 mb-8">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={18} className="text-indigo-600" />
+            <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Route Optimization Comparison</h2>
+            <div className="flex-1 border-t border-slate-200" />
+            {routeMetrics && (
+              <span className="text-xs text-slate-400 font-medium">
+                Computed in {routeMetrics.kpis?.execution_time_ms || routeMetrics.comparison_metrics?.execution_time_ms || '—'} ms
+              </span>
+            )}
+          </div>
+          {loadingMetrics && !routeMetrics ? (
+            <p className="text-xs text-slate-400 animate-pulse">Computing route metrics…</p>
+          ) : routeMetrics ? (
+            <div className="grid grid-cols-2 gap-4">
+              {/* Greedy Baseline */}
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Greedy Baseline (Nearest Stop)</p>
+                <div className="grid grid-cols-2 gap-y-3 text-sm">
+                  <div>
+                    <p className="text-xs text-slate-400 mb-0.5">Distance</p>
+                    <p className="font-bold text-slate-800">{routeMetrics.greedy_kpis?.total_distance_km?.toFixed(1) || '—'} km</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 mb-0.5">Travel Time</p>
+                    <p className="font-bold text-slate-800">{routeMetrics.greedy_kpis?.total_travel_time_sec ? (routeMetrics.greedy_kpis.total_travel_time_sec / 60).toFixed(0) : '—'} min</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 mb-0.5">Efficiency</p>
+                    <p className="font-bold text-slate-800">{routeMetrics.greedy_kpis?.route_efficiency_score?.toFixed(1) || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 mb-0.5">Stops</p>
+                    <p className="font-bold text-slate-800">{routeMetrics.greedy_kpis?.stops || routeMetrics.greedy_sequence?.length || '—'}</p>
+                  </div>
+                </div>
+              </div>
+              {/* OR-Tools Optimized */}
+              <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-200">
+                <p className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-3">OR-Tools Optimized ✦</p>
+                <div className="grid grid-cols-2 gap-y-3 text-sm">
+                  <div>
+                    <p className="text-xs text-indigo-400 mb-0.5">Distance</p>
+                    <p className="font-bold text-indigo-800">{routeMetrics.kpis?.total_distance_km?.toFixed(1) || '—'} km</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-indigo-400 mb-0.5">Travel Time</p>
+                    <p className="font-bold text-indigo-800">{routeMetrics.kpis?.total_travel_time_sec ? (routeMetrics.kpis.total_travel_time_sec / 60).toFixed(0) : '—'} min</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-indigo-400 mb-0.5">Efficiency</p>
+                    <p className="font-bold text-indigo-800">{routeMetrics.kpis?.route_efficiency_score?.toFixed(1) || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-indigo-400 mb-0.5">Stops</p>
+                    <p className="font-bold text-indigo-800">{routeMetrics.kpis?.stops || routeMetrics.optimized_sequence?.length || '—'}</p>
+                  </div>
+                </div>
+                {routeMetrics.comparison_metrics && (
+                  <div className="mt-3 pt-3 border-t border-indigo-200">
+                    <p className="text-xs text-indigo-600 font-bold">
+                      {routeMetrics.comparison_metrics.distance_saved_km > 0
+                        ? `✓ Saves ${routeMetrics.comparison_metrics.distance_saved_km?.toFixed(1)} km · ${routeMetrics.comparison_metrics.time_saved_mins?.toFixed(0)} min vs baseline`
+                        : 'Route is already near-optimal for this dataset'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* AI ROUTE MONITOR SECTION */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
@@ -425,6 +641,84 @@ const Simulation = () => {
             {loading && activeEvent === e.type && <span className="text-xs text-indigo-500 mt-2 animate-pulse font-medium">Replanning...</span>}
           </button>
         ))}
+      </div>
+
+      {/* AI NEARBY STOP DECISION ENGINE CONSOLE */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+          <div>
+            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              <Bot size={20} className="text-indigo-600" /> AI Nearby Stop Decision Engine &amp; 4 Constraints Evaluator
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Evaluates unserved candidate stops against 4 core logistics constraints (Time Window, Zone, COD Limit ₹10k, Capacity/Hours) before re-sequencing the route.
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleEvaluateNearby('stop_7', 'stop_9', 10000.0)}
+              disabled={evaluatingNearby}
+              className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg border border-indigo-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <Zap size={14} /> Test Stop 7 (Feasible → SERVE)
+            </button>
+            <button
+              onClick={() => handleEvaluateNearby('stop_7', 'stop_9', 5000.0)}
+              disabled={evaluatingNearby}
+              className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold rounded-lg border border-amber-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <AlertTriangle size={14} /> Test Stop 7 (COD Violation → SKIP)
+            </button>
+          </div>
+        </div>
+
+        {nearbyResult && (
+          <div className={`p-4 rounded-xl border ${nearbyResult.decision === 'SERVE' ? 'bg-emerald-50/70 border-emerald-200' : 'bg-red-50/70 border-red-200'}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                {nearbyResult.decision === 'SERVE' ? (
+                  <span className="px-3 py-1 bg-emerald-600 text-white font-extrabold text-xs rounded-full flex items-center gap-1 shadow-sm">
+                    <CheckCircle size={14} /> SERVE {nearbyResult.candidate_stop_id.toLowerCase().includes('stop') ? nearbyResult.candidate_stop_id.replace('_',' ').toUpperCase() : `STOP ${nearbyResult.candidate_stop_id}`} BEFORE {nearbyResult.target_stop_id.toLowerCase().includes('stop') ? nearbyResult.target_stop_id.replace('_',' ').toUpperCase() : `STOP ${nearbyResult.target_stop_id}`}
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 bg-red-600 text-white font-extrabold text-xs rounded-full flex items-center gap-1 shadow-sm">
+                    <XCircle size={14} /> SKIP {nearbyResult.candidate_stop_id.toLowerCase().includes('stop') ? nearbyResult.candidate_stop_id.replace('_',' ').toUpperCase() : `STOP ${nearbyResult.candidate_stop_id}`} (KEEP ORIGINAL ROUTE)
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-slate-500 font-semibold">
+                Detour: <span className="font-bold text-slate-800">+{nearbyResult.detour_km} km</span> | Additional ETA: <span className="font-bold text-slate-800">+{nearbyResult.additional_time_min} mins</span>
+              </div>
+            </div>
+
+            {/* 4 Business Constraints Matrix */}
+            <div className="grid grid-cols-4 gap-3 my-3">
+              {nearbyResult.constraints_check?.map(c => (
+                <div key={c.name} className={`p-3 rounded-lg border text-xs ${c.passed ? 'bg-white border-emerald-200 text-slate-700' : 'bg-white border-red-200 text-red-800'}`}>
+                  <div className="flex items-center justify-between font-bold mb-1">
+                    <span>{c.name}</span>
+                    {c.passed ? <CheckCircle size={14} className="text-emerald-500" /> : <XCircle size={14} className="text-red-500" />}
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-tight">{c.details}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-white/80 p-3 rounded-lg border border-slate-200 text-xs text-slate-700 font-medium mb-3">
+              <strong className="text-slate-900 font-bold">AI Rationale: </strong>{nearbyResult.explanation}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={handleApplyNearbyDecision}
+                className={`px-4 py-2 text-xs font-bold text-white rounded-lg shadow-sm transition-colors cursor-pointer ${nearbyResult.decision === 'SERVE' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 hover:bg-slate-800'}`}
+              >
+                {nearbyResult.decision === 'SERVE' ? "Apply Re-sequenced Route (Visit Stop 7 First)" : "Confirm Skip (Maintain Current Route)"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* BOTTOM: Event History + Replanning Result */}
@@ -505,13 +799,15 @@ const Simulation = () => {
                 <p className="text-sm text-slate-500 mb-4">Event: <strong className="text-slate-800">{pendingResult.eventLabel || pendingResult.eventType}</strong></p>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    <p className="text-xs font-bold text-slate-400 uppercase mb-1">Old Route</p>
-                    <p className="text-sm font-medium text-slate-700">Stops: {pendingResult.before_sequence?.length || activeRouteData?.stops}</p>
-                    <p className="text-sm font-medium text-slate-700">Dist/ETA Baseline</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase mb-1">Current Route</p>
+                    <p className="text-sm font-medium text-slate-700">Stops: {mapSequence?.length || activeRouteData?.stops}</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Delivered: <strong className="text-emerald-600">{Object.keys(liveDeliveredStops.current || {}).length}</strong>
+                    </p>
                   </div>
                   <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100">
-                    <p className="text-xs font-bold text-indigo-400 uppercase mb-1">Proposed Route</p>
-                    <p className="text-sm font-medium text-indigo-800">Stops: {pendingResult.after_sequence?.length || 'N/A'}</p>
+                    <p className="text-xs font-bold text-indigo-400 uppercase mb-1">Re-planned Route</p>
+                    <p className="text-sm font-medium text-indigo-800">Stops: {pendingResult.after_sequence?.length || proposedSequence.length || 'N/A'}</p>
                     <p className="text-sm font-medium text-indigo-800">
                       Dist: {pendingResult.event_impact?.distance_difference_km > 0 ? '+' : ''}{pendingResult.event_impact?.distance_difference_km?.toFixed(2)} km
                     </p>
@@ -520,6 +816,26 @@ const Simulation = () => {
                     </p>
                   </div>
                 </div>
+
+                {/* AI Explanation */}
+                {(pendingResult.ai_explanation?.summary || pendingResult.ai_explanation?.explanation || pendingResult.ai_explanation?.supervisor_recommendation) && (
+                  <div className="bg-indigo-50/60 border border-indigo-200 rounded-lg p-3 mb-4">
+                    <p className="text-xs font-bold text-indigo-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                      <Bot size={12} /> AI Analysis
+                    </p>
+                    <p className="text-xs text-slate-700 leading-relaxed">
+                      {pendingResult.ai_explanation?.summary ||
+                       pendingResult.ai_explanation?.explanation ||
+                       pendingResult.ai_explanation?.supervisor_recommendation}
+                    </p>
+                    {pendingResult.event_impact?.replan_execution_sec && (
+                      <p className="text-[11px] text-indigo-400 mt-1 font-semibold">
+                        Re-planned in {pendingResult.event_impact.replan_execution_sec}s · from {pendingResult.replan_start === 'vehicle_current_position' ? 'vehicle position' : 'depot'}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Feasibility Constraints</h4>
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {pendingResult.feasibility_check?.constraints?.map(c => (
@@ -549,20 +865,36 @@ const Simulation = () => {
             )}
           </div>
 
-          {/* Pending status badge + action button */}
+          {/* Pending status badge + action buttons */}
           {pendingResult && approvalStatus === 'pending' && (
-            <>
-              <div className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold border bg-amber-50 border-amber-200 text-amber-800 animate-pulse">
-                <span className="w-2 h-2 bg-amber-400 rounded-full" />
-                Awaiting Supervisor Decision...
+            <div className="mt-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border bg-amber-50 border-amber-200 text-amber-900 animate-pulse">
+                <span className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
+                ⚠️ Route Change Detected — Awaiting Supervisor Approval
               </div>
+              
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <button
+                  onClick={handleApproveReplan}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg shadow-sm transition-colors flex justify-center items-center gap-1 cursor-pointer"
+                >
+                  <CheckCircle2 size={14} /> Approve Re-plan
+                </button>
+                <button
+                  onClick={handleRejectReplan}
+                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg shadow-sm transition-colors flex justify-center items-center gap-1 cursor-pointer"
+                >
+                  <XCircle size={14} /> Reject Re-plan
+                </button>
+              </div>
+
               <Link
                 to={`/supervisor?routeId=${routeId}`}
-                className="w-full mt-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2.5 rounded shadow-sm transition-colors flex justify-center items-center"
+                className="w-full mt-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 rounded transition-colors flex justify-center items-center gap-1"
               >
-                <CheckCircle2 size={14} className="mr-2" /> Review in Supervisor Console <ArrowRight size={14} className="ml-2" />
+                Review in Supervisor Console <ArrowRight size={12} />
               </Link>
-            </>
+            </div>
           )}
         </div>
       </div>

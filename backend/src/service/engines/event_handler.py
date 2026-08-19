@@ -61,7 +61,11 @@ class EventEngine:
                      before re-optimization; unaffected predictions are reused.
         """
         start = time.time()
-        before_sequence = list(route.stops.keys())
+        try:
+            opt_before = self.optimizer.optimize(route)
+            before_sequence = opt_before.get("sequence", list(route.stops.keys()))
+        except Exception:
+            before_sequence = list(route.stops.keys())
 
         # Capture the baseline BEFORE any stop removals
         before_metrics = self.greedy.optimize(route)

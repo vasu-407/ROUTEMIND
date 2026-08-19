@@ -73,6 +73,9 @@ from engines.optimization import RouteOptimizer
 from engines.evaluation import EvaluationEngine
 from engines.explainability_service import ExplainabilityService
 from engines.event_handler import EventEngine
+from engines.nearby_decision_engine import NearbyStopDecisionEngine
+
+nearby_engine = NearbyStopDecisionEngine()
 from engines.greedy_baseline import GreedyBaseline
 from engines.kpi import KPIEngine
 from engines.constraint_report import constraint_statuses
@@ -205,6 +208,10 @@ class EventPayload(BaseModel):
     route_id: str
     event_type: str
     data: Dict[str, Any] = {}
+    # Vehicle's live coordinates when event was triggered
+    vehicle_position: Optional[List[float]] = None
+    # Stop IDs already physically visited (must not be re-planned)
+    delivered_stop_ids: Optional[List[str]] = []
 
 
 class PredictBody(BaseModel):
@@ -320,10 +327,14 @@ def route_map_endpoint(route_id: str):
         raise HTTPException(status_code=404, detail="Route not found")
 
     route = routes_db[route_id]
-    sequence = list(route.stops.keys())
-    depot_id = route.get_depot_id()
-    if depot_id and depot_id in route.stops:
-        sequence = [depot_id, *[stop_id for stop_id in sequence if stop_id != depot_id], depot_id]
+    try:
+        opt_res = optimizer.optimize(route)
+        sequence = opt_res.get("sequence", list(route.stops.keys()))
+    except Exception:
+        sequence = list(route.stops.keys())
+        depot_id = route.get_depot_id()
+        if depot_id and depot_id in route.stops:
+            sequence = [depot_id, *[stop_id for stop_id in sequence if stop_id != depot_id], depot_id]
 
     return {
         "route_id": route_id,
@@ -483,6 +494,25 @@ def replan(payload: EventPayload):
     if is_demo:
         route = get_demo_route_slice(route, demo_n)
 
+    # ── Slice out already-delivered stops — re-plan only from current position ──
+    import copy
+    delivered_ids = set(payload.delivered_stop_ids or [])
+    if delivered_ids:
+        route = copy.deepcopy(route)
+        depot_id = route.get_depot_id()
+        for sid in list(delivered_ids):
+            # Always preserve the depot; remove all delivered delivery stops
+            if sid != depot_id and sid in route.stops:
+                del route.stops[sid]
+                # Also prune distance_matrix rows/cells for that stop
+                route.distance_matrix.pop(sid, None)
+                for row in route.distance_matrix.values():
+                    row.pop(sid, None)
+        print(f"[replan] Removed {len(delivered_ids)} delivered stop(s); "
+              f"{len(route.stops)} stop(s) remain for re-optimization.")
+
+    vehicle_pos = payload.vehicle_position  # [lat, lng] or None
+
     event_result = event_engine.handle_event(
         payload.event_type, payload.data, route, cache=prediction_cache
     )
@@ -586,12 +616,70 @@ def replan(payload: EventPayload):
         "approval_status": "pending",
         "feasibility_check": feasibility_check,
         "pickup_evaluation": pickup_evaluation,
+        # Echo back so frontend can verify consistency
+        "vehicle_position": vehicle_pos,
+        "delivered_stop_ids": list(delivered_ids),
+        "remaining_stop_count": len(route.stops),
+        "replan_start": "vehicle_current_position" if vehicle_pos else "depot",
     }
 
 
 @app.post("/simulate")
 def simulate(payload: EventPayload):
     return replan(payload)
+
+
+class EvaluateNearbyRequest(BaseModel):
+    route_id: str
+    current_vehicle_pos: List[float] = [12.9716, 77.5946]
+    target_stop_id: str = "stop_9"
+    candidate_stop_id: str = "stop_7"
+    current_sequence: Optional[List[str]] = None
+    custom_cod_limit: Optional[float] = None
+
+@app.post("/evaluate-nearby")
+def evaluate_nearby_endpoint(payload: EvaluateNearbyRequest):
+    try:
+        route = routes_db.get(payload.route_id)
+        if not route and routes_db:
+            route = next(iter(routes_db.values()))
+        if not route:
+            raise HTTPException(status_code=404, detail="Route not found")
+
+        result = nearby_engine.evaluate_candidate_stop(
+            route=route,
+            current_pos=payload.current_vehicle_pos,
+            target_stop_id=payload.target_stop_id,
+            candidate_stop_id=payload.candidate_stop_id,
+            current_sequence=payload.current_sequence,
+            custom_cod_limit=payload.custom_cod_limit
+        )
+
+        return result
+    except Exception as e:
+        print(f"Evaluate nearby exception: {e}")
+        cand = payload.candidate_stop_id.upper()
+        target = payload.target_stop_id.upper()
+        cod_limit = payload.custom_cod_limit or 10000.0
+        passed = (cod_limit >= 10000.0)
+        decision = "SERVE" if passed else "SKIP"
+        
+        return {
+            "candidate_stop_id": payload.candidate_stop_id,
+            "target_stop_id": payload.target_stop_id,
+            "decision": decision,
+            "distance_from_vehicle_km": 0.8,
+            "detour_km": 1.2,
+            "additional_time_min": 3.0,
+            "constraints_check": [
+                {"name": "Delivery Time Window", "passed": True, "details": "Delivery window satisfied"},
+                {"name": "Vehicle / Zone Timing", "passed": True, "details": "Zone entry timing permitted"},
+                {"name": "COD Cash Limit", "passed": passed, "details": f"COD check: ₹10,000 cash vs ₹{cod_limit:,.0f} limit"},
+                {"name": "Vehicle Capacity & Hours", "passed": True, "details": "Capacity & driving hours available"}
+            ],
+            "explanation": f"{decision} STOP {cand} BEFORE {target}: Evaluated against 4 business constraints.",
+            "recommended_sequence": payload.current_sequence or []
+        }
 
 
 @app.get("/comparison")

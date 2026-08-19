@@ -24,6 +24,7 @@ module.exports = {
   getRouteMap: (routeId) => pythonClient.get(`/routes/${encodeURIComponent(routeId)}/map`),
   optimizeRoute: (routeId) => pythonClient.post(`/optimize?route_id=${routeId}`),
   replan: (payload) => pythonClient.post('/replan', payload),
+  evaluateNearby: (payload) => pythonClient.post('/evaluate-nearby', payload),
   getComparison: (routeId, demoN) => {
     let url = `/comparison?route_id=${routeId}`;
     if (demoN) url += `&demo_n=${demoN}`;

@@ -1,0 +1,169 @@
+Loading raw data...
+Note: c:\amazon-last-mile\almrrc2021-data-training\model_build_inputs/enriched_metadata.json not found — generating defaults
+Loaded 100 routes successfully.
+[ML] 14042 new predictions, 0 from cache (total 14042 pairs, 119 stops).
+[ML] 11130 new predictions, 0 from cache (total 11130 pairs, 106 stops).
+[ML] 16256 new predictions, 0 from cache (total 16256 pairs, 128 stops).
+[ML] 20022 new predictions, 0 from cache (total 20022 pairs, 142 stops).
+[ML] 23870 new predictions, 0 from cache (total 23870 pairs, 155 stops).
+[ML] 35910 new predictions, 0 from cache (total 35910 pairs, 190 stops).
+[ML] 25760 new predictions, 0 from cache (total 25760 pairs, 161 stops).
+[analytics] seeded 7 baseline run(s) from loaded routes.
+INFO:     127.0.0.1:53215 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60327 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49671 - "GET /routes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56056 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57029 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57029 - "GET /routes HTTP/1.1" 200 OK
+[ML] 600 new predictions, 0 from cache (total 600 pairs, 25 stops).
+INFO:     127.0.0.1:57029 - "GET /routes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57029 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57556 - "GET /comparison?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e&demo_n=25 HTTP/1.1" 200 OK
+[ML] All 600 travel-time predictions served from cache (25 stops).
+INFO:     127.0.0.1:57556 - "GET /comparison?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e&demo_n=25 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57556 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59621 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59625 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59626 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57287 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53111 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55280 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52022 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52024 - "POST /monitor/scan HTTP/1.1" 200 OK
+Validating Route RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e against 9 constraints...
+INFO:     127.0.0.1:63631 - "GET /routes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63632 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+Validating Route RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e against 9 constraints...
+Validating Route RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e against 9 constraints...
+INFO:     127.0.0.1:63634 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63632 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60306 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63631 - "GET /routes HTTP/1.1" 200 OK
+[ML] 20280 new predictions, 600 from cache (total 20880 pairs, 145 stops).
+INFO:     127.0.0.1:63634 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63632 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63632 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63631 - "GET /routes HTTP/1.1" 200 OK
+[ML] 20280 new predictions, 600 from cache (total 20880 pairs, 145 stops).
+[ML] 20280 new predictions, 600 from cache (total 20880 pairs, 145 stops).
+INFO:     127.0.0.1:63631 - "GET /monitor/events HTTP/1.1" 200 OK
+Gemini explain failed: No module named 'google.generativeai'
+INFO:     127.0.0.1:63630 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+Gemini explain failed: No module named 'google.generativeai'
+INFO:     127.0.0.1:63633 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+Gemini explain failed: No module named 'google.generativeai'
+INFO:     127.0.0.1:60304 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "POST /evaluate-nearby HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "POST /evaluate-nearby HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "POST /evaluate-nearby HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60304 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54801 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54801 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54801 - "POST /evaluate-nearby HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54801 - "GET /monitor/events HTTP/1.1" 200 OK
+[ML] All 600 travel-time predictions served from cache (25 stops).
+INFO:     127.0.0.1:54801 - "GET /routes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54801 - "GET /routes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54801 - "POST /monitor/scan HTTP/1.1" 200 OK
+Validating Route RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e against 9 constraints...
+[ML] All 20880 travel-time predictions served from cache (145 stops).
+Validating Route RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e against 9 constraints...
+INFO:     127.0.0.1:54007 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54006 - "GET /routes HTTP/1.1" 200 OK
+[ML] All 20880 travel-time predictions served from cache (145 stops).
+INFO:     127.0.0.1:54009 - "GET /monitor/events HTTP/1.1" 200 OK
+Validating Route RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e against 9 constraints...
+INFO:     127.0.0.1:54006 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+[ML] All 20880 travel-time predictions served from cache (145 stops).
+INFO:     127.0.0.1:54009 - "GET /routes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54006 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54009 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57918 - "GET /comparison?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e&demo_n=25 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54006 - "GET /routes HTTP/1.1" 200 OK
+[ML] All 600 travel-time predictions served from cache (25 stops).
+INFO:     127.0.0.1:54009 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54009 - "GET /monitor/events HTTP/1.1" 200 OK
+Gemini explain failed: No module named 'google.generativeai'
+INFO:     127.0.0.1:54801 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+Gemini explain failed: No module named 'google.generativeai'
+INFO:     127.0.0.1:54008 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+Gemini explain failed: No module named 'google.generativeai'
+INFO:     127.0.0.1:54007 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54008 - "POST /events/EVT-12120FD3/approve HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54008 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57918 - "GET /comparison?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e&demo_n=25 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57918 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57918 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57918 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57918 - "GET /routes HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56439 - "GET /comparison?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e&demo_n=25 HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56440 - "GET /routes HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56441 - "GET /comparison?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e&demo_n=25 HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56156 - "GET /routes HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56157 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56158 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56159 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56160 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56157 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56161 - "GET /routes HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56160 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56162 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56157 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56163 - "GET /routes HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:56162 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56162 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56162 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56162 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56162 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56162 - "POST /events/EVT-4D517E30/approve HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56162 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "POST /events/EVT-37F117CF/reject HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "POST /events/EVT-AD451EB2/reject HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "POST /events/EVT-2CB184A8/reject HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "POST /events/EVT-D96BDF3A/reject HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56167 - "GET /routes HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:60260 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:64443 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64444 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:64445 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64446 - "GET /routes HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:64443 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64445 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64447 - "POST /optimize?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:64448 - "GET /routes HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:64443 - "GET /events?route_id=RouteID_0091a35c-85fa-4b5e-90cf-4778f441753e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64445 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64445 - "GET /monitor/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64445 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54255 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54256 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54257 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55861 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55862 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51949 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51950 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51951 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51952 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51954 - "POST /monitor/scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51955 - "POST /monitor/scan HTTP/1.1" 200 OK

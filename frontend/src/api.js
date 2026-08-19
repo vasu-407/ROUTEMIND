@@ -22,6 +22,7 @@ export const getSupervisorDecision = (routeId) => api.get(`/supervisor/decision/
 export const getEvents = (routeId) => api.get(routeId ? `/events?route_id=${encodeURIComponent(routeId)}` : '/events');
 export const approveEvent = (eventId, payload) => api.post(`/events/${encodeURIComponent(eventId)}/approve`, payload);
 export const rejectEvent = (eventId, payload) => api.post(`/events/${encodeURIComponent(eventId)}/reject`, payload);
+export const evaluateNearbyStop = (payload) => api.post('/evaluate-nearby', payload);
 export const askCopilot = (payload) => api.post('/copilot', payload);
 
 // ── Monitor and Demo APIs ──────────────────────────────────
